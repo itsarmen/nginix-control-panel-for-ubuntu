@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Nginix Control Panel
+Exec=/path/to/your/app
+Icon=app-icon
+Categories=Utility;
+Terminal=false
