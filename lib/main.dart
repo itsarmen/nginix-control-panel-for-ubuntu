@@ -82,9 +82,11 @@ class _DashboardState extends State<_Dashboard> {
       const DatabasesPage(),
       const BackupsPage(),
       const RestorePage(),
+      const CronJobsPage(),
       const ConfigsPage(),
       const TerminalPage(),
       const NetworkPage(),
+      const FirewallPage(),
     ];
 
     return MaterialApp(
@@ -161,7 +163,7 @@ leading: Padding(
       body: Row(
         children: [
           YaruNavigationRail(
-            length: 8,
+            length: 10,
             selectedIndex: selectedIndex,
             leading: const SizedBox.shrink(),
             trailing: const SizedBox.shrink(),
@@ -173,9 +175,11 @@ leading: Padding(
                 (Icons.storage_outlined, Icons.storage, 'Databases'),
                 (Icons.backup_outlined, Icons.backup, 'Backups'),
                 (Icons.settings_backup_restore, Icons.settings_backup_restore, 'Restore'),
+                (Icons.schedule_outlined, Icons.schedule, 'Cron Jobs'),
                 (Icons.code, Icons.code, 'Configs'),
                 (Icons.terminal, Icons.terminal, 'Terminal'),
                 (Icons.lan_outlined, Icons.lan, 'Network'),
+                (Icons.shield_outlined, Icons.shield, 'Firewall'),
               ];
               final icon =
                   selected ? items[index].$2 : items[index].$1;
@@ -2007,6 +2011,915 @@ class _NetworkPageState extends State<NetworkPage> {
             label: const Text('Refresh'),
           ),
         ),
+      ],
+    );
+  }
+}
+
+/* ================================================================
+   Firewall
+   ================================================================ */
+
+class UfwRule {
+  final String spec;
+  final String action;
+  final String proto;
+  final Set<int> ports;
+  const UfwRule(this.spec, this.action, this.proto, this.ports);
+}
+
+class UfwStatus {
+  final bool active;
+  final List<UfwRule> rules;
+  final Set<int> openTcp;
+  const UfwStatus(this.active, this.rules, this.openTcp);
+}
+
+class FirewallPage extends StatefulWidget {
+  const FirewallPage({super.key});
+
+  @override
+  State<FirewallPage> createState() => _FirewallPageState();
+}
+
+class _FirewallPageState extends State<FirewallPage> {
+  final _portCtrl = TextEditingController();
+  final _portFocus = FocusNode();
+  String _proto = 'tcp';
+
+  final _chkPortCtrl = TextEditingController();
+  final _chkHostCtrl = TextEditingController(text: '127.0.0.1');
+  bool _checking = false;
+  int? _chkPort;
+  String _chkHost = '';
+  bool? _chkListening;
+  bool? _chkFw;
+  bool? _chkReach;
+
+  UfwStatus? _status;
+  bool _loading = true;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _portCtrl.dispose();
+    _portFocus.dispose();
+    _chkPortCtrl.dispose();
+    _chkHostCtrl.dispose();
+    super.dispose();
+  }
+
+  static Set<int> _portsFor(String to) {
+    final t = to.trim();
+    final range = RegExp(r'^(\d+)(?::(\d+))?/(tcp|udp)$').firstMatch(t);
+    if (range != null) {
+      final a = int.parse(range.group(1)!);
+      final b = range.group(2) != null ? int.parse(range.group(2)!) : a;
+      return {for (var p = a; p <= b; p++) p};
+    }
+    final lower = t.toLowerCase();
+    if (lower.contains('nginx full') || lower.contains('www full')) {
+      return {80, 443};
+    }
+    if (lower.contains('nginx https')) return {443};
+    if (lower.contains('nginx http') || lower == 'www') return {80};
+    if (lower.contains('openssh') || lower == 'ssh') return {22};
+    return {};
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    bool active = false;
+    final rules = <UfwRule>[];
+    final openTcp = <int>{};
+
+    final r = await Process.run('sudo', ['-n', 'ufw', 'status']);
+    final out = '${r.stdout}${r.stderr}';
+    if (out.toLowerCase().contains('status: active')) active = true;
+
+    final lineRe =
+        RegExp(r'^(.+?)\s{2,}(ALLOW|DENY|LIMIT|REJECT)\s+(.+)$');
+    for (var line in out.split('\n')) {
+      line = line.trimRight();
+      if (line.trim().isEmpty ||
+          line.startsWith('To') ||
+          line.startsWith('--') ||
+          line.toLowerCase().startsWith('status:')) {
+        continue;
+      }
+      final m = lineRe.firstMatch(line);
+      if (m == null) continue;
+      var spec = m.group(1)!.trim();
+      final v6 = spec.endsWith('(v6)');
+      spec = spec.replaceAll(RegExp(r'\s*\(v6\)\s*$'), '').trim();
+      final action = m.group(2)!;
+      final ports = _portsFor(spec);
+      String proto = 'tcp';
+      final pm = RegExp(r'/(tcp|udp)$').firstMatch(spec);
+      if (pm != null) proto = pm.group(1)!;
+      rules.add(UfwRule(spec, action, proto, ports));
+      if (action == 'ALLOW' && proto == 'tcp') {
+        openTcp.addAll(ports);
+      }
+      if (v6 && action == 'ALLOW' && proto == 'tcp') {
+        openTcp.addAll(ports);
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _status = UfwStatus(active, rules, openTcp);
+        _loading = false;
+      });
+    }
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _ufw(List<String> args, String okMsg) async {
+    setState(() => _busy = true);
+    try {
+      final r = await Process.run('sudo', ['-n', 'ufw', ...args]);
+      if (r.exitCode != 0) {
+        final err = '${r.stdout}${r.stderr}'.trim();
+        _snack('Failed${err.isEmpty ? '' : ': $err'}');
+      } else {
+        _snack(okMsg);
+      }
+    } catch (e) {
+      _snack('Failed: $e');
+    }
+    await _load();
+    if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _togglePort(int port, bool open) async {
+    final st = _status;
+    if (st == null) return;
+    if (!st.active) {
+      _snack('Firewall is inactive — enable it first');
+      return;
+    }
+    if (open) {
+      await _ufw(['allow', '$port/tcp'], 'Opened port $port/tcp');
+      return;
+    }
+    final specs = <String>{};
+    for (final rule in st.rules) {
+      if (rule.action == 'ALLOW' &&
+          rule.proto == 'tcp' &&
+          rule.ports.contains(port)) {
+        specs.add(rule.spec);
+      }
+    }
+    if (specs.isEmpty) {
+      _snack('Port $port/tcp is already closed');
+      return;
+    }
+    setState(() => _busy = true);
+    for (final spec in specs) {
+      await Process.run('sudo', ['-n', 'ufw', 'delete', 'allow', spec]);
+    }
+    _snack('Closed port $port/tcp');
+    await _load();
+    if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _enableFirewall() async {
+    setState(() => _busy = true);
+    await Process.run('sudo', ['-n', 'ufw', 'allow', 'OpenSSH']);
+    await Process.run('sudo', ['-n', 'ufw', 'allow', 'Nginx Full']);
+    await Process.run('sudo', ['-n', 'ufw', '--force', 'enable']);
+    _snack('Firewall enabled (SSH, HTTP, HTTPS allowed)');
+    await _load();
+    if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _applyCustom(bool open) async {
+    final port = int.tryParse(_portCtrl.text.trim());
+    if (port == null || port < 1 || port > 65535) {
+      _snack('Enter a valid port (1–65535)');
+      return;
+    }
+    if (!(_status?.active ?? false)) {
+      _snack('Firewall is inactive — enable it first');
+      return;
+    }
+    final spec = '$port/$_proto';
+    if (open) {
+      await _ufw(['allow', spec], 'Opened port $spec');
+    } else {
+      await _ufw(['delete', 'allow', spec], 'Closed port $spec');
+    }
+  }
+
+  Future<void> _checkPort() async {
+    final port = int.tryParse(_chkPortCtrl.text.trim());
+    if (port == null || port < 1 || port > 65535) {
+      _snack('Enter a valid port (1–65535)');
+      return;
+    }
+    final host = _chkHostCtrl.text.trim().isEmpty
+        ? '127.0.0.1'
+        : _chkHostCtrl.text.trim();
+
+    setState(() {
+      _checking = true;
+      _chkPort = port;
+      _chkHost = host;
+      _chkListening = null;
+      _chkFw = null;
+      _chkReach = null;
+    });
+
+    // 1. Is something listening locally on this TCP port?
+    bool listening = false;
+    try {
+      final ss = await Process.run('ss', ['-ltnH']);
+      if (ss.exitCode == 0) {
+        for (final line in (ss.stdout as String? ?? '').split('\n')) {
+          final cols = line.trim().split(RegExp(r'\s+'));
+          if (cols.length >= 4) {
+            final local = cols[3];
+            final m = RegExp(r'[:.](\d+)$').firstMatch(local);
+            if (m != null && int.tryParse(m.group(1)!) == port) {
+              listening = true;
+              break;
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 2. Does UFW allow it?
+    bool? allowed;
+    if (_status != null) {
+      allowed = _status!.active && _status!.openTcp.contains(port);
+    }
+
+    // 3. Can we reach host:port right now?
+    bool reachable = false;
+    try {
+      final sock = await Socket.connect(
+        host,
+        port,
+        timeout: const Duration(seconds: 3),
+      );
+      reachable = true;
+      sock.destroy();
+    } catch (_) {
+      reachable = false;
+    }
+
+    if (mounted) {
+      setState(() {
+        _chkListening = listening;
+        _chkFw = allowed;
+        _chkReach = reachable;
+        _checking = false;
+      });
+    }
+  }
+
+  Widget _chkRow(String label, bool? value, String? yes, String? no) {
+    final errorColor = Theme.of(context).colorScheme.error;
+    Color color;
+    String text;
+    if (value == null) {
+      color = Colors.grey;
+      text = 'Unknown';
+    } else if (value) {
+      color = Colors.green.shade600;
+      text = yes ?? 'Yes';
+    } else {
+      color = errorColor;
+      text = no ?? 'No';
+    }
+    return ListTile(
+      dense: true,
+      leading: Icon(
+        value == null
+            ? Icons.help_outline
+            : value
+                ? Icons.check_circle_outline
+                : Icons.cancel_outlined,
+        color: color,
+      ),
+      title: Text(label),
+      trailing: Text(text,
+          style: TextStyle(
+              color: color, fontWeight: FontWeight.w600, fontSize: 13)),
+    );
+  }
+
+  Widget _toggleTile(int port, String label) {
+    final open = _status?.openTcp.contains(port) ?? false;
+    return ListTile(
+      leading: Icon(open ? Icons.lock_open : Icons.lock,
+          color: open ? Colors.green.shade600 : Colors.grey),
+      title: Text('$label  ($port/tcp)'),
+      subtitle: Text(open ? 'Open — accepting connections' : 'Closed'),
+      trailing: Switch(
+        value: open,
+        onChanged: _busy || _loading || !(_status?.active ?? false)
+            ? null
+            : (v) => _togglePort(port, v),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final st = _status;
+    final active = st?.active ?? false;
+    final errorColor = Theme.of(context).colorScheme.error;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          children: [
+            const Text('Firewall',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(width: 12),
+            if (!_loading)
+              Chip(
+                avatar: Icon(
+                  active ? Icons.shield : Icons.shield_outlined,
+                  size: 18,
+                  color: active ? Colors.green.shade700 : errorColor,
+                ),
+                label: Text(active ? 'Active' : 'Inactive'),
+              ),
+            const Spacer(),
+            if (_busy || _loading)
+              const YaruCircularProgressIndicator(strokeWidth: 2.5),
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'Refresh',
+              onPressed: _busy || _loading ? null : _load,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        const Text('Manage the UFW firewall (ports 80/443 and custom rules).',
+            style: TextStyle(color: Colors.grey)),
+        const SizedBox(height: 12),
+        if (!_loading && !active)
+          YaruBorderContainer(
+            child: ListTile(
+              leading: Icon(Icons.warning_amber, color: errorColor),
+              title: const Text('Firewall is inactive'),
+              subtitle: const Text(
+                  'Rules have no effect until UFW is enabled. Enabling allows '
+                  'SSH, HTTP and HTTPS first so you are not locked out.'),
+              trailing: FilledButton(
+                onPressed: _busy ? null : _enableFirewall,
+                child: const Text('ENABLE'),
+              ),
+            ),
+          ),
+        if (!_loading && !active) const SizedBox(height: 12),
+        YaruBorderContainer(
+          child: Column(
+            children: [
+              _toggleTile(80, 'HTTP'),
+              const Divider(height: 1),
+              _toggleTile(443, 'HTTPS'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        const Text('Custom Port',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            SizedBox(
+              width: 130,
+              child: TextField(
+                controller: _portCtrl,
+                focusNode: _portFocus,
+                keyboardType: TextInputType.number,
+                enabled: !_busy,
+                decoration: const InputDecoration(
+                  labelText: 'Port',
+                  hintText: 'e.g. 8080',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onSubmitted: (_) => _applyCustom(true),
+              ),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 110,
+              child: DropdownButtonFormField<String>(
+                initialValue: _proto,
+                decoration: const InputDecoration(
+                  labelText: 'Protocol',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'tcp', child: Text('TCP')),
+                  DropdownMenuItem(value: 'udp', child: Text('UDP')),
+                ],
+                onChanged: _busy
+                    ? null
+                    : (v) => setState(() => _proto = v ?? 'tcp'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed: _busy ? null : () => _applyCustom(true),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('OPEN'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : () => _applyCustom(false),
+              icon: const Icon(Icons.remove, size: 18),
+              label: const Text('CLOSE'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        const Text('Port Status Checker',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            SizedBox(
+              width: 130,
+              child: TextField(
+                controller: _chkPortCtrl,
+                keyboardType: TextInputType.number,
+                enabled: !_checking,
+                decoration: const InputDecoration(
+                  labelText: 'Port',
+                  hintText: 'e.g. 443',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onSubmitted: (_) => _checkPort(),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _chkHostCtrl,
+                enabled: !_checking,
+                decoration: const InputDecoration(
+                  labelText: 'Host / IP',
+                  hintText: '127.0.0.1 or example.com',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onSubmitted: (_) => _checkPort(),
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed: _checking ? null : _checkPort,
+              icon: const Icon(Icons.search, size: 18),
+              label: const Text('CHECK'),
+            ),
+          ],
+        ),
+        if (_checking || _chkPort != null) ...[
+          const SizedBox(height: 12),
+          YaruBorderContainer(
+            child: _checking
+                ? const Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Center(
+                        child: YaruCircularProgressIndicator(
+                            strokeWidth: 2.5)),
+                  )
+                : Column(
+                    children: [
+                      ListTile(
+                        dense: true,
+                        title: Text('Check: $_chkHost:$_chkPort/tcp',
+                            style:
+                                const TextStyle(fontFamily: 'monospace')),
+                        subtitle: const Text(
+                            'TCP connect uses a 3 second timeout'),
+                      ),
+                      const Divider(height: 1),
+                      _chkRow('Listening on this server', _chkListening,
+                          'Something is listening', 'Nothing is listening'),
+                      const Divider(height: 1),
+                      _chkRow('UFW firewall allows it', _chkFw,
+                          'Allowed by UFW', 'Blocked / UFW inactive'),
+                      const Divider(height: 1),
+                      _chkRow('Connection to $_chkHost', _chkReach,
+                          'Connection succeeded',
+                          'Refused or timed out'),
+                    ],
+                  ),
+          ),
+        ],
+        const SizedBox(height: 20),
+        const Text('Active Rules',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        YaruBorderContainer(
+          child: _loading
+              ? const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: YaruCircularProgressIndicator()),
+                )
+              : (st == null || st.rules.isEmpty)
+                  ? const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Center(
+                          child: Text('No rules',
+                              style: TextStyle(color: Colors.grey))),
+                    )
+                  : Column(
+                      children: [
+                        for (final (i, rule) in st.rules.indexed) ...[
+                          if (i > 0) const Divider(height: 1),
+                          ListTile(
+                            dense: true,
+                            leading: Icon(
+                              rule.action == 'ALLOW'
+                                  ? Icons.check_circle_outline
+                                  : Icons.block,
+                              color: rule.action == 'ALLOW'
+                                  ? Colors.green.shade600
+                                  : errorColor,
+                            ),
+                            title: Text(rule.spec,
+                                style:
+                                    const TextStyle(fontFamily: 'monospace')),
+                            trailing: Text(rule.action,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ],
+                    ),
+        ),
+      ],
+    );
+  }
+}
+
+/* ================================================================
+   Cron Jobs (automatic backup schedule)
+   ================================================================ */
+
+class CronJobsPage extends StatefulWidget {
+  const CronJobsPage({super.key});
+
+  @override
+  State<CronJobsPage> createState() => _CronJobsPageState();
+}
+
+class _CronJobsPageState extends State<CronJobsPage> {
+  static const _cronPath = '/etc/cron.d/mariadb-backup';
+  static const _backupScript = '/usr/local/bin/backup-db.sh';
+  static const _systemDbs = {
+    'information_schema',
+    'mysql',
+    'performance_schema',
+    'sys',
+  };
+
+  static const _presets = <String, String>{
+    'Every hour': '0 * * * *',
+    'Every day (02:00)': '0 2 * * *',
+    'Every week (Monday 02:00)': '0 2 * * 1',
+    'Every month (1st, 02:00)': '0 2 1 * *',
+    'Custom cron': '',
+  };
+
+  final _customCtrl = TextEditingController();
+
+  List<String> _databases = [];
+  Set<String> _selected = {};
+  bool _all = true;
+  String _preset = 'Every week (Monday 02:00)';
+  String _currentCron = '';
+  bool _loading = true;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _customCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<String> _sql(String sql) async {
+    final p = await Process.start('sudo', ['mariadb', '-N', '-B']);
+    p.stdin.write(sql);
+    await p.stdin.close();
+    final out = await p.stdout.transform(utf8.decoder).join();
+    await p.stderr.drain();
+    await p.exitCode;
+    return out.trim();
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final out = await _sql(
+        'SELECT SCHEMA_NAME FROM information_schema.SCHEMATA;',
+      );
+      final dbs = out
+          .split('\n')
+          .map((l) => l.trim())
+          .where((l) => l.isNotEmpty && !_systemDbs.contains(l))
+          .toList()
+        ..sort();
+
+      final r = await Process.run('sudo', ['-n', 'cat', _cronPath]);
+      final content = r.exitCode == 0 ? r.stdout.toString() : '';
+
+      String schedule = '';
+      final chosen = <String>{};
+      bool all = false;
+      for (final raw in content.split('\n')) {
+        final line = raw.trim();
+        if (line.isEmpty || line.startsWith('#')) continue;
+        final parts = line.split(RegExp(r'\s+'));
+        if (parts.length < 7) continue;
+        if (schedule.isEmpty) schedule = parts.sublist(0, 5).join(' ');
+        final cmd = parts.sublist(6).join(' ');
+        final m = RegExp(r'backup-db\.sh\s*([^>]*)').firstMatch(cmd);
+        if (m == null) continue;
+        final arg = m.group(1)!.trim();
+        if (arg.isEmpty || arg == 'all') {
+          all = true;
+        } else {
+          chosen.add(arg);
+        }
+      }
+      if (schedule.isEmpty) {
+        schedule = _presets['Every week (Monday 02:00)']!;
+      }
+
+      var preset = 'Custom cron';
+      for (final e in _presets.entries) {
+        if (e.key != 'Custom cron' && e.value == schedule) {
+          preset = e.key;
+          break;
+        }
+      }
+      if (preset == 'Custom cron') _customCtrl.text = schedule;
+
+      if (mounted) {
+        setState(() {
+          _databases = dbs;
+          _all = all || chosen.isEmpty;
+          _selected = chosen;
+          _preset = preset;
+          _currentCron = content;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  String get _schedule => _preset == 'Custom cron'
+      ? _customCtrl.text.trim()
+      : _presets[_preset]!;
+
+  List<String> get _targets {
+    if (_all || _selected.isEmpty) return [''];
+    return _selected.toList()..sort();
+  }
+
+  String _preview() {
+    final sched = _schedule;
+    final dbs = _targets;
+    final label =
+        _all || _selected.isEmpty ? 'all databases' : (_selected.toList()..sort()).join(', ');
+    final buf = StringBuffer()
+      ..writeln('# Managed by Nginix Control Panel - automatic database backup')
+      ..writeln('# Period: $_preset')
+      ..writeln('# Databases: $label');
+    for (final db in dbs) {
+      final arg = db.isEmpty ? '' : ' $db';
+      buf.writeln('$sched root $_backupScript$arg >/dev/null 2>&1');
+    }
+    return buf.toString();
+  }
+
+  Future<void> _save() async {
+    final sched = _schedule;
+    if (sched.split(RegExp(r'\s+')).length != 5) {
+      _snack('Schedule must be a 5-field cron expression');
+      return;
+    }
+    if (!_all && _selected.isEmpty) {
+      _snack('Select at least one database');
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final tmp = '/tmp/_cron_write.tmp';
+      await File(tmp).writeAsString(_preview());
+      final r = await Process.run('sudo', ['cp', tmp, _cronPath]);
+      await Process.run('sudo', ['chmod', '644', _cronPath]);
+      if (r.exitCode != 0) {
+        _snack('Failed to write cron file');
+      } else {
+        _snack('Backup schedule saved');
+        await _load();
+      }
+    } catch (e) {
+      _snack('Failed: $e');
+    }
+    if (mounted) setState(() => _saving = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final errColor = Theme.of(context).colorScheme.error;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          children: [
+            const Text('Cron Jobs',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Spacer(),
+            if (_saving || _loading)
+              const YaruCircularProgressIndicator(strokeWidth: 2.5),
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'Refresh',
+              onPressed: _saving || _loading ? null : _load,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        const Text('Automatic backup period for selected databases.',
+            style: TextStyle(color: Colors.grey)),
+        if (_error != null) ...[
+          const SizedBox(height: 8),
+          Text(_error!, style: TextStyle(color: errColor)),
+        ],
+        const SizedBox(height: 12),
+        if (_loading)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: YaruCircularProgressIndicator(),
+            ),
+          )
+        else ...[
+          YaruBorderContainer(
+            child: ListTile(
+              leading: const Icon(Icons.schedule),
+              title: const Text('Current schedule'),
+              subtitle: Text(
+                _currentCron.trim().isEmpty
+                    ? 'No cron file found yet'
+                    : _currentCron.trim().split('\n').where(
+                        (l) => l.trim().isNotEmpty && !l.trim().startsWith('#')).join('\n'),
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text('Auto Backup Period',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            initialValue: _presets.containsKey(_preset) ? _preset : 'Custom cron',
+            decoration: const InputDecoration(
+              labelText: 'Period',
+              border: OutlineInputBorder(),
+            ),
+            items: _presets.keys
+                .map((k) => DropdownMenuItem(value: k, child: Text(k)))
+                .toList(),
+            onChanged: _saving
+                ? null
+                : (v) => setState(() => _preset = v ?? _preset),
+          ),
+          if (_preset == 'Custom cron') ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: _customCtrl,
+              enabled: !_saving,
+              style: const TextStyle(fontFamily: 'monospace'),
+              decoration: const InputDecoration(
+                labelText: 'Cron expression',
+                hintText: 'm h dom mon dow   (e.g. 30 3 * * 0)',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ],
+          const SizedBox(height: 20),
+          const Text('Databases',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          YaruBorderContainer(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  title: const Text('Back up all databases'),
+                  subtitle: const Text('Includes anything added later'),
+                  value: _all,
+                  onChanged: _saving
+                      ? null
+                      : (v) => setState(() => _all = v),
+                ),
+                if (!_all) ...[
+                  const Divider(height: 1),
+                  Row(
+                    children: [
+                      const SizedBox(width: 16),
+                      TextButton(
+                        onPressed: _saving
+                            ? null
+                            : () => setState(() =>
+                                _selected = _databases.toSet()),
+                        child: const Text('Select all'),
+                      ),
+                      TextButton(
+                        onPressed: _saving
+                            ? null
+                            : () => setState(() => _selected = {}),
+                        child: const Text('Clear'),
+                      ),
+                    ],
+                  ),
+                  for (final db in _databases)
+                    CheckboxListTile(
+                      dense: true,
+                      title: Text(db),
+                      value: _selected.contains(db),
+                      onChanged: _saving
+                          ? null
+                          : (v) => setState(() {
+                                if (v == true) {
+                                  _selected.add(db);
+                                } else {
+                                  _selected.remove(db);
+                                }
+                              }),
+                    ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text('Generated Cron Entry',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          YaruBorderContainer(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: SelectableText(
+                _preview().trimRight(),
+                style:
+                    const TextStyle(fontFamily: 'monospace', fontSize: 13),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _saving || _loading ? null : _save,
+            icon: const Icon(Icons.save, size: 18),
+            label: const Text('SAVE SCHEDULE'),
+          ),
+        ],
       ],
     );
   }
