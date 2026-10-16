@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:yaru/yaru.dart';
@@ -77,7 +79,9 @@ class _DashboardState extends State<_Dashboard> {
     final pages = [
       ServicesPage(key: PageStorageKey('services')),
       const WebsitesPage(),
+      const DatabasesPage(),
       const BackupsPage(),
+      const RestorePage(),
       const ConfigsPage(),
       const TerminalPage(),
       const NetworkPage(),
@@ -157,7 +161,7 @@ leading: Padding(
       body: Row(
         children: [
           YaruNavigationRail(
-            length: 6,
+            length: 8,
             selectedIndex: selectedIndex,
             leading: const SizedBox.shrink(),
             trailing: const SizedBox.shrink(),
@@ -166,7 +170,9 @@ leading: Padding(
               final items = [
                 (Icons.settings_outlined, Icons.settings, 'Services'),
                 (Icons.language_outlined, Icons.language, 'Websites'),
+                (Icons.storage_outlined, Icons.storage, 'Databases'),
                 (Icons.backup_outlined, Icons.backup, 'Backups'),
+                (Icons.settings_backup_restore, Icons.settings_backup_restore, 'Restore'),
                 (Icons.code, Icons.code, 'Configs'),
                 (Icons.terminal, Icons.terminal, 'Terminal'),
                 (Icons.lan_outlined, Icons.lan, 'Network'),
@@ -431,7 +437,8 @@ class Site {
   final String status;
   final String root;
   final String config;
-  Site(this.name, this.status, this.root, this.config);
+  final String url;
+  Site(this.name, this.status, this.root, this.config, {this.url = ''});
 }
 
 class WebsitesPage extends StatefulWidget {
@@ -452,8 +459,24 @@ class _WebsitesPageState extends State<WebsitesPage> {
     _load();
   }
 
+  static const _websitesJsonPath = '/etc/nginx/websites.json';
+
   Future<void> _load() async {
     setState(() => _loading = true);
+
+    // The website list is defined in /etc/nginx/websites.json. If that file is
+    // missing or invalid we fall back to scanning the nginx sites directory.
+    final configured = await _loadFromJson();
+    if (configured != null) {
+      if (mounted) {
+        setState(() {
+          _sites = configured;
+          _loading = false;
+        });
+      }
+      return;
+    }
+
     final dir = Directory('/etc/nginx/sites-available');
     final enabled = Directory('/etc/nginx/sites-enabled');
     final enabledNames = <String>{};
@@ -483,12 +506,6 @@ class _WebsitesPageState extends State<WebsitesPage> {
       }
     }
     sites.sort((a, b) => a.name.compareTo(b.name));
-    sites.add(Site(
-      'phpMyAdmin',
-      'Active',
-      '/usr/share/phpmyadmin',
-      '/etc/nginx/sites-available/exams-platform',
-    ));
     if (mounted) {
       setState(() {
         _sites = sites;
@@ -497,12 +514,50 @@ class _WebsitesPageState extends State<WebsitesPage> {
     }
   }
 
+  Future<List<Site>?> _loadFromJson() async {
+    try {
+      final file = File(_websitesJsonPath);
+      if (!await file.exists()) return null;
+      final decoded = jsonDecode(await file.readAsString());
+      final entries = decoded is Map ? decoded['websites'] : decoded;
+      if (entries is! List) return null;
+
+      final enabledNames = <String>{};
+      final enabled = Directory('/etc/nginx/sites-enabled');
+      if (await enabled.exists()) {
+        await for (final e in enabled.list()) {
+          enabledNames.add(e.path.split('/').last);
+        }
+      }
+
+      final sites = <Site>[];
+      for (final entry in entries) {
+        if (entry is! Map) continue;
+        final name = (entry['name'] ?? '').toString();
+        if (name.isEmpty) continue;
+        final config = (entry['config'] ?? '').toString();
+        final root = (entry['root'] ?? '-').toString();
+        final url = (entry['url'] ?? '').toString();
+        final enabledFlag = entry['enabled'];
+        final status = enabledFlag is bool
+            ? (enabledFlag ? 'Active' : 'Disabled')
+            : (config.isNotEmpty &&
+                    enabledNames.contains(config.split('/').last))
+                ? 'Active'
+                : 'Configured';
+        sites.add(Site(name, status, root, config, url: url));
+      }
+      return sites;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _openInBrowser(Site site) async {
-    final url = site.name == 'phpMyAdmin'
-        ? 'https://127.0.0.1/phpmyadmin'
-        : site.name == 'exams-platform'
-            ? 'https://$serverIp'
-            : 'http://$serverIp/${site.name}';
+    final raw = site.url.isNotEmpty
+        ? site.url
+        : 'http://$serverIp/${site.name}';
+    final url = raw.replaceAll('{serverIp}', serverIp).replaceAll('{ip}', serverIp);
     await Process.run('xdg-open', [url]);
   }
 
@@ -587,6 +642,387 @@ class _WebsitesPageState extends State<WebsitesPage> {
 }
 
 /* ================================================================
+   Databases
+   ================================================================ */
+
+class DbInfo {
+  final String name;
+  final List<String> users;
+  DbInfo(this.name, this.users);
+}
+
+class DatabasesPage extends StatefulWidget {
+  const DatabasesPage({super.key});
+
+  @override
+  State<DatabasesPage> createState() => _DatabasesPageState();
+}
+
+class _DatabasesPageState extends State<DatabasesPage> {
+  static const _systemDbs = {
+    'information_schema',
+    'mysql',
+    'performance_schema',
+    'sys',
+  };
+
+  List<DbInfo> _dbs = [];
+  bool _loading = true;
+  final Set<String> _busy = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  // -- helpers ---------------------------------------------------------------
+
+  Future<String> _sql(String sql) async {
+    final p = await Process.start('sudo', ['mariadb', '-N', '-B']);
+    p.stdin.write(sql);
+    await p.stdin.close();
+    final out = await p.stdout.transform(utf8.decoder).join();
+    final err = await p.stderr.transform(utf8.decoder).join();
+    final code = await p.exitCode;
+    if (code != 0) {
+      throw Exception(err.trim().isEmpty ? 'Command failed' : err.trim());
+    }
+    return out.trim();
+  }
+
+  static String _ident(String name) => '`${name.replaceAll('`', '')}`';
+
+  static String _lit(String value) => "'${value.replaceAll("'", "''")}'";
+
+  static bool _validIdent(String name) =>
+      RegExp(r'^[A-Za-z0-9_]+$').hasMatch(name);
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final out = await _sql(
+        "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA;",
+      );
+      final names = out
+          .split('\n')
+          .map((l) => l.trim())
+          .where((l) => l.isNotEmpty && !_systemDbs.contains(l))
+          .toList()
+        ..sort();
+
+      final dbs = <DbInfo>[];
+      for (final name in names) {
+        final users = <String>[];
+        try {
+          final u = await _sql(
+            'SELECT GRANTEE FROM information_schema.SCHEMA_PRIVILEGES '
+            'WHERE TABLE_SCHEMA=${_lit(name)};',
+          );
+          for (final line in u.split('\n')) {
+            final m = RegExp(r"^'([^']+)'@").firstMatch(line.trim());
+            if (m != null && !users.contains(m.group(1))) {
+              users.add(m.group(1)!);
+            }
+          }
+        } catch (_) {}
+        dbs.add(DbInfo(name, users));
+      }
+      if (mounted) {
+        setState(() {
+          _dbs = dbs;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        _snack('Failed to load databases: $e');
+      }
+    }
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // -- actions ---------------------------------------------------------------
+
+  Future<void> _createDatabase() async {
+    final result = await _showFormDialog(
+      title: 'New Database',
+      fields: const [
+        _FormField('Database name', hint: 'myapp'),
+        _FormField('Username', hint: 'myapp'),
+        _FormField('Password', hint: 'auto-generate if left blank', obscure: true),
+      ],
+      submitLabel: 'Create',
+    );
+    if (result == null) return;
+
+    final dbName = result[0].trim();
+    var user = result[1].trim();
+    var pass = result[2];
+    if (dbName.isEmpty) return _snack('Database name is required');
+    if (!_validIdent(dbName)) {
+      return _snack('Database name may only contain letters, digits, _');
+    }
+    if (user.isEmpty) user = dbName;
+    if (!_validIdent(user)) {
+      return _snack('Username may only contain letters, digits, _');
+    }
+    if (pass.isEmpty) pass = _randomPassword();
+
+    setState(() => _busy.add(dbName));
+    try {
+      await _sql(
+        'CREATE DATABASE IF NOT EXISTS ${_ident(dbName)} '
+        'CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;'
+        "CREATE USER IF NOT EXISTS '$user'@'localhost' "
+        'IDENTIFIED BY ${_lit(pass)};'
+        "ALTER USER '$user'@'localhost' IDENTIFIED BY ${_lit(pass)};"
+        'GRANT ALL PRIVILEGES ON ${_ident(dbName)}.* '
+        "TO '$user'@'localhost';"
+        'FLUSH PRIVILEGES;',
+      );
+      _snack('Created database "$dbName" (user: $user, password: $pass)');
+    } catch (e) {
+      _snack('Create failed: $e');
+    }
+    if (mounted) setState(() => _busy.remove(dbName));
+    await _load();
+  }
+
+  Future<void> _changePassword(DbInfo db) async {
+    final defaultUser = db.users.isEmpty ? db.name : db.users.first;
+    final result = await _showFormDialog(
+      title: 'Change Password — ${db.name}',
+      fields: [
+        _FormField('Username', initial: defaultUser),
+        const _FormField('New password', obscure: true, hint: 'auto-generate if blank'),
+      ],
+      submitLabel: 'Change',
+    );
+    if (result == null) return;
+
+    final user = result[0].trim();
+    var pass = result[1];
+    if (user.isEmpty) return _snack('Username is required');
+    if (pass.isEmpty) pass = _randomPassword();
+
+    setState(() => _busy.add(db.name));
+    try {
+      await _sql(
+        "ALTER USER '$user'@'localhost' IDENTIFIED BY ${_lit(pass)};"
+        'FLUSH PRIVILEGES;',
+      );
+      _snack('Password for "$user" changed to: $pass');
+    } catch (e) {
+      _snack('Password change failed: $e');
+    }
+    if (mounted) setState(() => _busy.remove(db.name));
+  }
+
+  Future<void> _deleteDatabase(DbInfo db) async {
+    final dropUser = db.users.isNotEmpty;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete database "${db.name}"?'),
+        content: Text(
+          'This permanently drops the database and all its data.'
+          '${dropUser ? '\n\nThe user "${db.users.first}" will also be dropped.' : ''}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _busy.add(db.name));
+    try {
+      var sql = 'DROP DATABASE IF EXISTS ${_ident(db.name)};';
+      for (final u in db.users) {
+        sql += "DROP USER IF EXISTS '$u'@'localhost';";
+      }
+      sql += 'FLUSH PRIVILEGES;';
+      await _sql(sql);
+      _snack('Deleted database "${db.name}"');
+    } catch (e) {
+      _snack('Delete failed: $e');
+    }
+    if (mounted) setState(() => _busy.remove(db.name));
+    await _load();
+  }
+
+  static String _randomPassword() {
+    const chars =
+        'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    final rnd = Random.secure();
+    return List.generate(20, (_) => chars[rnd.nextInt(chars.length)]).join();
+  }
+
+  Future<List<String>?> _showFormDialog({
+    required String title,
+    required List<_FormField> fields,
+    required String submitLabel,
+  }) {
+    final controllers =
+        fields.map((f) => TextEditingController(text: f.initial)).toList();
+    return showDialog<List<String>>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < fields.length; i++) ...[
+                if (i > 0) const SizedBox(height: 12),
+                TextField(
+                  controller: controllers[i],
+                  obscureText: fields[i].obscure,
+                  decoration: InputDecoration(
+                    labelText: fields[i].label,
+                    hintText: fields[i].hint,
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+              context,
+              controllers.map((c) => c.text).toList(),
+            ),
+            child: Text(submitLabel),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // -- build -----------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          children: [
+            const Text('Databases',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Spacer(),
+            FilledButton.tonalIcon(
+              onPressed: _createDatabase,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('New Database'),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'Refresh',
+              onPressed: _loading ? null : _load,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'MariaDB • create, drop databases and manage user passwords',
+          style: TextStyle(color: Colors.grey),
+        ),
+        const SizedBox(height: 12),
+        if (_loading)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: YaruCircularProgressIndicator(),
+            ),
+          )
+        else
+          YaruBorderContainer(
+            child: _dbs.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Center(
+                      child: Text('No databases found',
+                          style: TextStyle(color: Colors.grey)),
+                    ),
+                  )
+                : Column(
+                    children: [
+                      for (final (i, db) in _dbs.indexed) ...[
+                        if (i > 0) const Divider(height: 1),
+                        _dbTile(context, db),
+                      ],
+                    ],
+                  ),
+          ),
+      ],
+    );
+  }
+
+  Widget _dbTile(BuildContext context, DbInfo db) {
+    final busy = _busy.contains(db.name);
+    return ListTile(
+      leading: Icon(Icons.storage_rounded,
+          color: Theme.of(context).colorScheme.primary),
+      title: Text(db.name),
+      subtitle: Text(db.users.isEmpty
+          ? 'No dedicated user'
+          : 'Users: ${db.users.join(', ')}'),
+      trailing: Wrap(
+        spacing: 4,
+        children: [
+          TextButton.icon(
+            onPressed: busy ? null : () => _changePassword(db),
+            icon: const Icon(Icons.password, size: 18),
+            label: const Text('Password'),
+          ),
+          TextButton.icon(
+            onPressed: busy ? null : () => _deleteDatabase(db),
+            icon: Icon(Icons.delete_outline,
+                size: 18, color: Theme.of(context).colorScheme.error),
+            label: Text('Delete',
+                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FormField {
+  final String label;
+  final String? hint;
+  final String? initial;
+  final bool obscure;
+  const _FormField(this.label,
+      {this.hint, this.initial, this.obscure = false});
+}
+
+/* ================================================================
    Backups
    ================================================================ */
 
@@ -598,13 +1034,42 @@ class BackupsPage extends StatefulWidget {
 }
 
 class _BackupsPageState extends State<BackupsPage> {
+  static const _allLabel = 'All databases';
+  static const _systemDbs = {
+    'information_schema',
+    'mysql',
+    'performance_schema',
+    'sys',
+  };
+
+  List<String> _databases = [];
+  String _selected = _allLabel;
   List<File> _files = [];
   bool _running = false;
 
   @override
   void initState() {
     super.initState();
+    _loadDatabases();
     _load();
+  }
+
+  Future<void> _loadDatabases() async {
+    try {
+      final p = await Process.start('sudo', ['mariadb', '-N', '-B']);
+      p.stdin.write('SELECT SCHEMA_NAME FROM information_schema.SCHEMATA;');
+      await p.stdin.close();
+      final out = await p.stdout.transform(utf8.decoder).join();
+      await p.stderr.drain();
+      await p.exitCode;
+      final dbs = out
+          .split('\n')
+          .map((l) => l.trim())
+          .where((l) => l.isNotEmpty && !_systemDbs.contains(l))
+          .toList()
+        ..sort();
+      if (mounted) setState(() => _databases = dbs);
+    } catch (_) {}
   }
 
   Future<void> _load() async {
@@ -622,13 +1087,27 @@ class _BackupsPageState extends State<BackupsPage> {
     if (mounted) setState(() => _files = files);
   }
 
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   Future<void> _backupNow() async {
     setState(() => _running = true);
-    await Process.run(
-      'sudo',
-      ['-n', '/usr/local/bin/backup-db.sh'],
-      runInShell: true,
-    );
+    try {
+      final args = _selected == _allLabel
+          ? ['-n', '/usr/local/bin/backup-db.sh']
+          : ['-n', '/usr/local/bin/backup-db.sh', _selected];
+      final r = await Process.run('sudo', args);
+      if (r.exitCode != 0) {
+        final err = r.stderr.toString().trim();
+        _snack('Backup failed${err.isEmpty ? '' : ': $err'}');
+      } else {
+        _snack('Backup complete: $_selected');
+      }
+    } catch (e) {
+      _snack('Backup failed: $e');
+    }
     await _load();
     if (mounted) setState(() => _running = false);
   }
@@ -643,6 +1122,31 @@ class _BackupsPageState extends State<BackupsPage> {
             const Text('Database Backups',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const Spacer(),
+            SizedBox(
+              width: 240,
+              child: DropdownButtonFormField<String>(
+                initialValue:
+                    _databases.contains(_selected) ? _selected : _allLabel,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Database',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: [
+                  const DropdownMenuItem(
+                    value: _allLabel,
+                    child: Text(_allLabel),
+                  ),
+                  for (final db in _databases)
+                    DropdownMenuItem(value: db, child: Text(db)),
+                ],
+                onChanged: _running
+                    ? null
+                    : (v) => setState(() => _selected = v ?? _allLabel),
+              ),
+            ),
+            const SizedBox(width: 12),
             _running
                 ? const Row(children: [
                     YaruCircularProgressIndicator(strokeWidth: 2.5),
@@ -654,6 +1158,13 @@ class _BackupsPageState extends State<BackupsPage> {
                     icon: const Icon(Icons.backup, size: 18),
                     label: const Text('BACKUP NOW'),
                   ),
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'Open backups folder',
+              onPressed: () =>
+                  Process.run('xdg-open', ['/var/backups/mariadb']),
+              icon: const Icon(Icons.folder_open),
+            ),
           ],
         ),
         const SizedBox(height: 6),
@@ -689,16 +1200,269 @@ class _BackupsPageState extends State<BackupsPage> {
         ? '${(byteSize / 1024).toStringAsFixed(1)} KB'
         : '${(byteSize / 1024 / 1024).toStringAsFixed(1)} MB';
     final date = f.statSync().modified.toLocal().toString().substring(0, 16);
+    final name = f.path.split('/').last;
+
+    // db-<label>-YYYY-MM-DD_HH-MM-SS.sql.enc  (older: db-<label>-YYYYMMDD-HHMMSS)
+    String label = '';
+    String when = '';
+    final m = RegExp(
+      r'^db-(.+?)-(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})\.sql\.enc$',
+    ).firstMatch(name);
+    final legacy =
+        RegExp(r'^db-(.+?)-(\d{8}-\d{6})\.sql\.enc$').firstMatch(name);
+    if (m != null) {
+      label = m.group(1)!;
+      when = m.group(2)!.replaceFirst('_', ' ');
+    } else if (legacy != null) {
+      label = legacy.group(1)!;
+      when = legacy.group(2)!;
+    }
 
     return ListTile(
       leading: const Icon(Icons.archive),
-      title: Text(f.path.split('/').last),
-      subtitle: Text('$size  •  $date'),
+      title: Text(name),
+      subtitle: Text(
+        '${label.isEmpty ? '' : 'Database: $label  •  '}$size  •  ${when.isEmpty ? date : when}',
+      ),
       trailing: IconButton(
         tooltip: 'Open Backup Folder',
         onPressed: () => Process.run('xdg-open', ['/var/backups/mariadb']),
         icon: const Icon(Icons.folder_open),
       ),
+    );
+  }
+}
+
+/* ================================================================
+   Restore
+   ================================================================ */
+
+class RestorePage extends StatefulWidget {
+  const RestorePage({super.key});
+
+  @override
+  State<RestorePage> createState() => _RestorePageState();
+}
+
+class _RestorePageState extends State<RestorePage> {
+  static const _backupDir = '/var/backups/mariadb';
+
+  List<File> _files = [];
+  String? _selected;
+  bool _loading = true;
+  bool _restoring = false;
+  String _log = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final dir = Directory(_backupDir);
+    final files = <File>[];
+    if (await dir.exists()) {
+      await for (final e in dir.list()) {
+        if (e is File && e.path.endsWith('.sql.enc')) files.add(e);
+      }
+    }
+    files.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+    if (mounted) {
+      setState(() {
+        _files = files;
+        _loading = false;
+        if (_selected != null && !files.any((f) => f.path == _selected)) {
+          _selected = null;
+        }
+      });
+    }
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  String _dbLabel(String name) {
+    final m = RegExp(r'^db-(.+?)-(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})\.sql\.enc$')
+        .firstMatch(name);
+    if (m != null) return m.group(1)!;
+    final legacy =
+        RegExp(r'^db-(.+?)-\d{8}-\d{6}\.sql\.enc$').firstMatch(name);
+    return legacy?.group(1) ?? 'unknown';
+  }
+
+  String _size(File f) {
+    final b = f.statSync().size;
+    return b < 1024 * 1024
+        ? '${(b / 1024).toStringAsFixed(1)} KB'
+        : '${(b / 1024 / 1024).toStringAsFixed(1)} MB';
+  }
+
+  Future<void> _restore() async {
+    final path = _selected;
+    if (path == null) return;
+    final label = _dbLabel(path.split('/').last);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Restore database?'),
+        content: Text(
+          'This will restore from:\n${path.split('/').last}\n\n'
+          'Target database: $label\n\n'
+          'Existing tables with the same name will be overwritten. '
+          'This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Restore'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() {
+      _restoring = true;
+      _log = 'Restoring $path …';
+    });
+
+    try {
+      final r = await Process.run('sudo', [
+        '-n',
+        '/usr/local/bin/restore-db.sh',
+        path,
+      ]);
+      final out = '${r.stdout}${r.stderr}'.trim();
+      if (r.exitCode != 0) {
+        setState(() => _log = 'Restore FAILED:\n$out');
+        _snack('Restore failed');
+      } else {
+        setState(() => _log = 'Restore complete.\n$out');
+        _snack('Restored ${path.split('/').last}');
+      }
+    } catch (e) {
+      setState(() => _log = 'Restore FAILED:\n$e');
+      _snack('Restore failed: $e');
+    }
+
+    if (mounted) setState(() => _restoring = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          children: [
+            const Text('Restore from Backup',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Spacer(),
+            IconButton(
+              tooltip: 'Refresh backups',
+              onPressed: _loading || _restoring ? null : _load,
+              icon: const Icon(Icons.refresh),
+            ),
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: 'Open backups folder',
+              onPressed: () => Process.run('xdg-open', [_backupDir]),
+              icon: const Icon(Icons.folder_open),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Decrypts an AES-256-CBC backup and imports it into MariaDB.',
+          style: TextStyle(color: Colors.grey),
+        ),
+        const SizedBox(height: 12),
+        if (_loading)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: YaruCircularProgressIndicator(),
+            ),
+          )
+        else if (_files.isEmpty)
+          YaruBorderContainer(
+            child: const Padding(
+              padding: EdgeInsets.all(32),
+              child: Center(
+                  child: Text('No backups available',
+                      style: TextStyle(color: Colors.grey))),
+            ),
+          )
+        else ...[
+          YaruBorderContainer(
+            child: RadioGroup<String>(
+              groupValue: _selected,
+              onChanged: (v) {
+                if (!_restoring) setState(() => _selected = v);
+              },
+              child: Column(
+                children: [
+                  for (final (i, f) in _files.indexed) ...[
+                    if (i > 0) const Divider(height: 1),
+                    RadioListTile<String>(
+                      value: f.path,
+                      title: Text(f.path.split('/').last),
+                      subtitle: Text(
+                        'Database: ${_dbLabel(f.path.split('/').last)}  •  ${_size(f)}',
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.error,
+                ),
+                onPressed:
+                    _selected == null || _restoring ? null : _restore,
+                icon: const Icon(Icons.settings_backup_restore, size: 18),
+                label: const Text('RESTORE'),
+              ),
+              const SizedBox(width: 12),
+              if (_restoring)
+                const Row(children: [
+                  YaruCircularProgressIndicator(strokeWidth: 2.5),
+                  SizedBox(width: 12),
+                  Text('Restoring…'),
+                ]),
+            ],
+          ),
+        ],
+        if (_log.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          YaruBorderContainer(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: SelectableText(
+                _log,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -716,8 +1480,9 @@ class ConfigsPage extends StatefulWidget {
 
 class _ConfigsPageState extends State<ConfigsPage> {
   static final configFiles = <String, String>{
-    'Nginx Config': '/etc/nginx/sites-available/exams-platform',
-    '.env File': '/var/www/websites/exams-platform/.env',
+    'Nginx Main Config': '/etc/nginx/nginx.conf',
+    'Nginx Site Config': '/etc/nginx/sites-available/demoweb.local',
+    '.env File': '/var/www/websites/demoweb.local/.env',
     'php.ini': '/etc/php/8.5/fpm/php.ini',
     'my.cnf': '/etc/mysql/mariadb.conf.d/50-server.cnf',
   };
@@ -738,22 +1503,26 @@ class _ConfigsPageState extends State<ConfigsPage> {
       _loading = true;
     });
     final path = configFiles[name]!;
-    if (await File(path).exists()) {
-      final content = await File(path).readAsString();
-      if (mounted) {
-        setState(() {
-          _content = content;
-          _loading = false;
-        });
-      }
-    } else {
-      if (mounted) {
-        setState(() {
-          _content = '';
-          _loading = false;
-        });
-      }
+    final content = await _readFile(path);
+    if (mounted) {
+      setState(() {
+        _content = content;
+        _loading = false;
+      });
     }
+  }
+
+  Future<String> _readFile(String path) async {
+    try {
+      final file = File(path);
+      if (await file.exists()) {
+        return await file.readAsString();
+      }
+    } catch (_) {}
+    // Fall back to privileged read for root-only files (e.g. .env).
+    final r = await Process.run('sudo', ['-n', 'cat', path]);
+    if (r.exitCode == 0) return r.stdout.toString();
+    return '';
   }
 
   Future<void> _save() async {
@@ -789,6 +1558,33 @@ class _ConfigsPageState extends State<ConfigsPage> {
     }
   }
 
+  Future<void> _openConfigFolder() async {
+    final path = configFiles[_selected] ?? '';
+    var dir = path.contains('/')
+        ? path.substring(0, path.lastIndexOf('/'))
+        : '/etc/nginx';
+    if (!await Directory(dir).exists()) {
+      dir = '/etc/nginx';
+    }
+    await Process.run('xdg-open', [dir]);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Opening $dir')),
+      );
+    }
+  }
+
+  Future<void> _openNginxFolder() async {
+    final dir = Directory('/etc/nginx/sites-available');
+    final target = await dir.exists() ? dir.path : '/etc/nginx';
+    await Process.run('xdg-open', [target]);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Opening $target')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -796,8 +1592,32 @@ class _ConfigsPageState extends State<ConfigsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Config Editor',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          Row(
+            children: [
+              const Text('Config Editor',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const Spacer(),
+              IconButton(
+                tooltip: 'Open nginx config folder',
+                onPressed: _openNginxFolder,
+                icon: const Icon(Icons.folder_open),
+              ),
+              IconButton(
+                tooltip: 'Open folder of selected file',
+                onPressed: _openConfigFolder,
+                icon: const Icon(Icons.drive_file_move_outline),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _selected == null ? '' : configFiles[_selected] ?? '',
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 12,
+              color: Colors.grey,
+            ),
+          ),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -879,7 +1699,7 @@ class _TerminalPageState extends State<TerminalPage> {
     'Memory': 'free -h',
     'Top Processes': 'ps aux --sort=-%cpu | head -15',
     'Network': 'ss -tlnp',
-    'Nginx Error Log': 'tail -50 /var/log/nginx/exams-platform-error.log',
+    'Nginx Error Log': 'tail -50 /var/log/nginx/demoweb.local-error.log',
     'Backup Log': 'tail -50 /var/log/backup-db.log',
     'MySQL Status': 'systemctl status mariadb',
     'SSL Cert': 'openssl x509 -in /etc/nginx/ssl/server.crt -noout -text | head -15',
