@@ -44,7 +44,7 @@ BACKUP_KEY="/etc/mariadb-backup.key"
 BACKUP_SCRIPT="/usr/local/bin/backup-db.sh"
 BACKUP_LOG="/var/log/backup-db.log"
 BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
-APP_DIR="${APP_DIR:-/opt/server_dashboard}"
+APP_DIR="${APP_DIR:-/opt/nginix-control-panel}"
 APP_SECRETS="${APP_SECRETS:-${APP_DIR}/secrets}"
 APACHE_BACKUP="/root/pre-nginx-setup-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
 

@@ -72,9 +72,9 @@ static void my_application_activate(GApplication* application) {
   const gchar* icon_paths[] = {
       env_icon,
       bundled_icon,
-      "/usr/share/pixmaps/server-dashboard.png",
-      "/usr/share/icons/hicolor/512x512/apps/server-dashboard.png",
-      "/usr/share/pixmaps/server-dashboard.png",
+      "/usr/share/pixmaps/nginix-control-panel.png",
+      "/usr/share/icons/hicolor/512x512/apps/nginix-control-panel.png",
+      "/usr/share/pixmaps/nginix-control-panel.png",
       nullptr,
   };
   for (gsize i = 0; icon_paths[i] != nullptr; i++) {

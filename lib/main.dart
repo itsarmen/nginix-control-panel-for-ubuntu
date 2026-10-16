@@ -381,7 +381,7 @@ class _ServicesPageState extends State<ServicesPage> {
       out.isEmpty
           ? 'Cannot read firewall status.\n'
               'Run the dashboard with sudo privileges '
-              '(e.g. sudo /opt/server_dashboard/server_dashboard).'
+              '(e.g. sudo /opt/nginix-control-panel/nginix-control-panel).'
           : out,
     );
   }

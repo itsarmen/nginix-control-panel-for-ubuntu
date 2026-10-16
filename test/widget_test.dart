@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:server_dashboard/main.dart';
+import 'package:nginix_control_panel/main.dart';
 
 void main() {
   testWidgets('App builds without errors', (WidgetTester tester) async {

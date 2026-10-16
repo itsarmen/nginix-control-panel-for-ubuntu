@@ -1,4 +1,4 @@
-name: server_dashboard
+name: nginix_control_panel
 description: "Nginix Control Panel"
 publish_to: 'none'
 
