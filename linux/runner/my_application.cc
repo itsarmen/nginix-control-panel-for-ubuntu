@@ -68,13 +68,10 @@ static void my_application_activate(GApplication* application) {
   g_autofree gchar* bundled_icon = g_build_filename(
       exe_dir, "data", "flutter_assets", "assets", "app-icon.png", nullptr);
 
-  const gchar* env_icon = g_getenv("SERVER_DASHBOARD_ICON");
   const gchar* icon_paths[] = {
-      env_icon,
       bundled_icon,
       "/usr/share/pixmaps/nginix-control-panel.png",
       "/usr/share/icons/hicolor/512x512/apps/nginix-control-panel.png",
-      "/usr/share/pixmaps/nginix-control-panel.png",
       nullptr,
   };
   for (gsize i = 0; icon_paths[i] != nullptr; i++) {

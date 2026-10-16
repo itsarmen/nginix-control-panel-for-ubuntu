@@ -24,7 +24,7 @@ script that sets the whole stack up from scratch.
 | **Backups**    | Encrypted (AES-256-CBC) backups of selected databases or all of them          |
 | **Restore**    | Restore a database from an encrypted backup with a confirmation step          |
 | **Cron Jobs**  | Choose an automatic backup period and which databases to include              |
-| **Configs**    | Edit and save key config files (nginx, site vhost, `.env`, `php.ini`, `my.cnf`) |
+| **Configs**    | Edit nginx `websites.json`, vhost, `php.ini`, `my.cnf`; manage the phpMyAdmin gate login |
 | **Terminal**   | Run shell commands and view output                                            |
 | **Network**    | Connection status, IP/subnet/gateway and DNS details                          |
 | **Firewall**   | UFW status, HTTP/HTTPS toggles, custom port open/close, and a port checker     |
@@ -45,6 +45,9 @@ Ubuntu look and feel.
 - **Restore** – pick an encrypted dump, confirm, and restore it into MariaDB.
 - **Cron Jobs** – set the auto-backup period (hourly / daily / weekly / monthly /
   custom cron) and target databases; previews the exact cron entry before saving.
+- **Configs** – tabbed editor for `/etc/nginx/nginx.conf`, the site vhost,
+  `/etc/nginx/websites.json`, `php.ini`, and `my.cnf`, with a **phpMyAdmin Gate**
+  tab that shows the nginx login and lets you change its password.
 - **Firewall** – enable UFW safely, toggle ports 80 and 443, open/close any custom
   port, inspect active rules, and check whether a port is listening, allowed, and
   reachable.
@@ -110,14 +113,22 @@ It performs, idempotently:
 - Creates the demo website `demoweb.local`, its database/user, and a self-signed
   TLS certificate in `/etc/nginx/ssl/`
 - Writes `/etc/nginx/websites.json` (read by the **Websites** tab)
+- Protects `/phpmyadmin` with an **nginx HTTP Basic login** (realm *Nginix
+  Control Panel*) and writes the credentials to `/etc/nginx/.nginix-htpasswd`
+  and `/etc/nginx/phpmyadmin-gate.json` (shown in **Configs → phpMyAdmin Gate**)
 - Installs `/usr/local/bin/backup-db.sh` (encrypted backups) and
   `/usr/local/bin/restore-db.sh`, plus a weekly cron job
 - Stores the backup key at `/etc/mariadb-backup.key` and a root-only copy under
   `/opt/nginix-control-panel/secrets/`
+- Installs the app bundle (if present) to `/opt/nginix-control-panel`, a
+  launcher link, hicolor icons, and a GNOME desktop entry named after the
+  application id (`com.nginix.controlpanel.desktop`)
+- Grants the invoking user passwordless `sudo` in
+  `/etc/sudoers.d/nginix-control-panel`
 
 > The app reads and writes privileged files, so the account running it should
-> have passwordless `sudo`. Review the script before running it on a production
-> machine.
+> have passwordless `sudo` — `setup-server.sh` configures this automatically for
+> `$SUDO_USER`. Review the script before running it on a production machine.
 
 ---
 
@@ -153,6 +164,8 @@ build-deb.sh               .deb packaging
 launch-dashboard.sh        Launch helper
 docs/                      Documentation
   nginx-multiple-hosts.md  Guide: nginx virtual hosts (SSL, no-SSL, custom ports)
+  firewall-ufw.md          Guide: UFW firewall setup and safe enabling
+  phpmyadmin-gate.md       Guide: the extra login in front of phpMyAdmin
 ```
 
 ---
@@ -171,6 +184,10 @@ docs/                      Documentation
 
 - [Serving multiple hosts with nginx](docs/nginx-multiple-hosts.md) — virtual
   hosts with SSL, without SSL, and on custom ports.
+- [Firewall (UFW)](docs/firewall-ufw.md) — enforcement vs. daemon state, safe
+  enabling, profiles, and troubleshooting.
+- [phpMyAdmin Login Gate](docs/phpmyadmin-gate.md) — the extra nginx login in
+  front of phpMyAdmin, its files, and how to change the password.
 
 ---
 

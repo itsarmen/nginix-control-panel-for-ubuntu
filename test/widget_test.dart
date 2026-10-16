@@ -3,7 +3,10 @@ import 'package:nginix_control_panel/main.dart';
 
 void main() {
   testWidgets('App builds without errors', (WidgetTester tester) async {
-    await tester.pumpWidget(const ServerDashboardApp());
+    await tester.runAsync(() async {
+      await tester.pumpWidget(const NginixControlPanelApp());
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
     await tester.pump();
   });
 }

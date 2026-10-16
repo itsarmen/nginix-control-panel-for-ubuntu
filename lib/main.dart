@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:yaru/yaru.dart';
 
 String serverIp = '127.0.0.1';
@@ -14,8 +15,19 @@ Future<void> detectServerIp() async {
       type: InternetAddressType.IPv4,
       includeLinkLocal: false,
     );
+    const virtualPrefixes = [
+      'docker',
+      'br-',
+      'veth',
+      'virbr',
+      'tun',
+      'tap',
+      'vmnet',
+      'dummy',
+    ];
     for (final iface in interfaces) {
       if (iface.name == 'lo') continue;
+      if (virtualPrefixes.any(iface.name.startsWith)) continue;
       for (final addr in iface.addresses) {
         if (!addr.isLoopback) {
           serverIp = addr.address;
@@ -26,21 +38,193 @@ Future<void> detectServerIp() async {
   } catch (_) {}
 }
 
+/// Shows a floating toast notification (bottom-right, rounded, auto-dismiss)
+/// instead of the default full-width bottom SnackBar.
+void showToast(BuildContext context, String message) =>
+    _Toasts.show(context, message);
+
+enum _ToastKind { info, success, error }
+
+class _ToastData {
+  _ToastData(this.message, this.kind);
+
+  final String message;
+  final _ToastKind kind;
+}
+
+class _Toasts {
+  static final List<_ToastData> _items = [];
+  static OverlayEntry? _entry;
+
+  static void show(BuildContext context, String message) {
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
+    final data = _ToastData(message, _kindFor(message));
+    _items.add(data);
+    if (_entry == null) {
+      final entry = OverlayEntry(
+        builder: (_) => _ToastOverlay(items: _items),
+      );
+      _entry = entry;
+      overlay.insert(entry);
+    } else {
+      _entry!.markNeedsBuild();
+    }
+    Future.delayed(const Duration(seconds: 4), () => _remove(data));
+  }
+
+  static void _remove(_ToastData data) {
+    if (!_items.remove(data)) return;
+    final entry = _entry;
+    if (entry == null) return;
+    if (_items.isEmpty) {
+      entry.remove();
+      _entry = null;
+    } else {
+      entry.markNeedsBuild();
+    }
+  }
+
+  static _ToastKind _kindFor(String message) {
+    final m = message.toLowerCase();
+    const errorWords = [
+      'fail',
+      'error',
+      'could not',
+      'cannot',
+      'invalid',
+      'required',
+      'unable',
+      'must',
+    ];
+    const successWords = [
+      'saved',
+      'complete',
+      'success',
+      'reloaded',
+      'created',
+      'restored',
+      'enabled',
+      'deleted',
+      'changed',
+      'closed',
+      'ok:',
+    ];
+    if (errorWords.any(m.contains)) return _ToastKind.error;
+    if (successWords.any(m.contains)) return _ToastKind.success;
+    return _ToastKind.info;
+  }
+}
+
+class _ToastOverlay extends StatelessWidget {
+  const _ToastOverlay({required this.items});
+
+  final List<_ToastData> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      right: 16,
+      bottom: 16,
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            for (final item in items) _ToastCard(data: item),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ToastCard extends StatefulWidget {
+  const _ToastCard({required this.data});
+
+  final _ToastData data;
+
+  @override
+  State<_ToastCard> createState() => _ToastCardState();
+}
+
+class _ToastCardState extends State<_ToastCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  )..forward();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final (Color accent, IconData icon) = switch (widget.data.kind) {
+      _ToastKind.error => (const Color(0xFFE5484D), Icons.error_outline),
+      _ToastKind.success =>
+        (const Color(0xFF30A46C), Icons.check_circle_outline),
+      _ToastKind.info => (scheme.primary, Icons.info_outline),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: FadeTransition(
+        opacity: _c,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.3),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(parent: _c, curve: Curves.easeOut)),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 380),
+            child: Material(
+              color: scheme.surfaceContainerHighest,
+              elevation: 6,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 20, color: accent),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        widget.data.message,
+                        style: TextStyle(color: scheme.onSurface),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await YaruWindowTitleBar.ensureInitialized();
   await detectServerIp();
-  runApp(const ServerDashboardApp());
+  runApp(const NginixControlPanelApp());
 }
 
-class ServerDashboardApp extends StatefulWidget {
-  const ServerDashboardApp({super.key});
+class NginixControlPanelApp extends StatefulWidget {
+  const NginixControlPanelApp({super.key});
 
   @override
-  State<ServerDashboardApp> createState() => _ServerDashboardAppState();
+  State<NginixControlPanelApp> createState() => _NginixControlPanelAppState();
 }
 
-class _ServerDashboardAppState extends State<ServerDashboardApp> {
+class _NginixControlPanelAppState extends State<NginixControlPanelApp> {
   final ThemeMode _themeMode = ThemeMode.dark;
 
   @override
@@ -237,17 +421,39 @@ class _ServicesPageState extends State<ServicesPage> {
   }
 
   Future<void> _check(String service) async {
-    final r = await Process.run('systemctl', ['is-active', service]);
-    if (mounted) {
-      setState(() => _active[service] = r.stdout.toString().trim() == 'active');
+    bool active;
+    if (service == 'ufw') {
+      final r = await Process.run('sudo', ['-n', 'ufw', 'status']);
+      active = r.stdout.toString().contains('Status: active');
+    } else {
+      final r = await Process.run('systemctl', ['is-active', service]);
+      active = r.stdout.toString().trim() == 'active';
     }
+    if (mounted) setState(() => _active[service] = active);
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    showToast(context, msg);
   }
 
   Future<void> _run(String action, String service) async {
-    setState(() => _busy[service] = true);
-    await Process.run('sudo', ['systemctl', action, service]);
+    if (mounted) setState(() => _busy[service] = true);
+    String? err;
+    try {
+      final r =
+          await Process.run('sudo', ['-n', 'systemctl', action, service]);
+      if (r.exitCode != 0) err = '${r.stdout}${r.stderr}'.trim();
+    } catch (e) {
+      err = '$e';
+    }
     await _check(service);
-    if (mounted) setState(() => _busy[service] = false);
+    if (mounted) {
+      setState(() => _busy[service] = false);
+      if (err != null && err.isNotEmpty) {
+        _snack('$action $service failed: $err');
+      }
+    }
   }
 
   @override
@@ -352,12 +558,12 @@ class _ServicesPageState extends State<ServicesPage> {
 
   Future<void> _runAll(String action) async {
     for (final s in ['nginx', 'mariadb']) {
-      setState(() => _busy[s] = true);
-      await Process.run('sudo', ['systemctl', action, s]);
+      if (mounted) setState(() => _busy[s] = true);
+      await Process.run('sudo', ['-n', 'systemctl', action, s]);
     }
     for (final s in ['nginx', 'mariadb']) {
       await _check(s);
-      setState(() => _busy[s] = false);
+      if (mounted) setState(() => _busy[s] = false);
     }
   }
 
@@ -366,7 +572,7 @@ class _ServicesPageState extends State<ServicesPage> {
   }
 
   Future<String> _out(List<String> cmd) async {
-    final r = await Process.run('sudo', cmd);
+    final r = await Process.run('sudo', ['-n', ...cmd]);
     final stdout = r.stdout.toString().trim();
     if (stdout.isNotEmpty) return stdout;
     return r.stderr.toString().trim();
@@ -405,7 +611,11 @@ class _ServicesPageState extends State<ServicesPage> {
       '-c',
       'openssl x509 -in /etc/nginx/ssl/server.crt -noout -subject -issuer -dates'
     ]);
-    if (mounted) _showTextDialog(context, 'SSL Certificate', r.stdout.toString());
+    if (!mounted) return;
+    final out = r.exitCode == 0
+        ? r.stdout.toString()
+        : 'Could not read certificate:\n${r.stderr.toString().trim()}';
+    _showTextDialog(context, 'SSL Certificate', out);
   }
 
   void _showTextDialog(BuildContext context, String title, String text) {
@@ -443,6 +653,24 @@ class Site {
   final String config;
   final String url;
   Site(this.name, this.status, this.root, this.config, {this.url = ''});
+}
+
+/// The nginx HTTP Basic gate guarding phpMyAdmin, read from
+/// /etc/nginx/phpmyadmin-gate.json (written by setup-server.sh).
+class GateCreds {
+  const GateCreds({
+    required this.name,
+    required this.url,
+    required this.realm,
+    required this.user,
+    required this.password,
+  });
+
+  final String name;
+  final String url;
+  final String realm;
+  final String user;
+  final String password;
 }
 
 class WebsitesPage extends StatefulWidget {
@@ -499,13 +727,9 @@ class _WebsitesPageState extends State<WebsitesPage> {
 
         var root = '-';
         final content = await e.readAsString();
-        for (final line in content.split('\n')) {
-          if (line.trim().startsWith('root') && line.contains('/var/www')) {
-            root =
-                line.trim().replaceFirst('root', '').replaceAll(';', '').trim();
-            break;
-          }
-        }
+        final m = RegExp(r'^\s*root\s+([^;#]+);', multiLine: true)
+            .firstMatch(content);
+        if (m != null) root = m.group(1)!.trim();
         sites.add(Site(name, status, root, e.path));
       }
     }
@@ -601,21 +825,23 @@ class _WebsitesPageState extends State<WebsitesPage> {
               itemBuilder: (context, i) {
                 final site = _sites[i];
                 final selected = site.name == _selected;
-                final statusColor = site.status == 'Active'
-                    ? Colors.green.shade600
-                    : Theme.of(context).colorScheme.error;
+                final statusColor = switch (site.status) {
+                  'Active' => Colors.green.shade600,
+                  'Configured' => Colors.orange,
+                  _ => Colors.grey,
+                };
+                final statusIcon = switch (site.status) {
+                  'Active' => Icons.check_circle,
+                  'Configured' => Icons.settings,
+                  _ => Icons.radio_button_unchecked,
+                };
 
                 return ListTile(
                   selected: selected,
                   selectedTileColor:
                       Theme.of(context).colorScheme.primaryContainer,
                   onTap: () => setState(() => _selected = site.name),
-                  leading: Icon(
-                    site.status == 'Active'
-                        ? Icons.check_circle
-                        : Icons.radio_button_unchecked,
-                    color: statusColor,
-                  ),
+                  leading: Icon(statusIcon, color: statusColor),
                   title: Text(site.name),
                   subtitle: Text('${site.status}  •  ${site.root}'),
                   trailing: Row(
@@ -683,11 +909,13 @@ class _DatabasesPageState extends State<DatabasesPage> {
   // -- helpers ---------------------------------------------------------------
 
   Future<String> _sql(String sql) async {
-    final p = await Process.start('sudo', ['mariadb', '-N', '-B']);
+    final p = await Process.start('sudo', ['-n', 'mariadb', '-N', '-B']);
     p.stdin.write(sql);
     await p.stdin.close();
-    final out = await p.stdout.transform(utf8.decoder).join();
-    final err = await p.stderr.transform(utf8.decoder).join();
+    final outFuture = p.stdout.transform(utf8.decoder).join();
+    final errFuture = p.stderr.transform(utf8.decoder).join();
+    final out = await outFuture;
+    final err = await errFuture;
     final code = await p.exitCode;
     if (code != 0) {
       throw Exception(err.trim().isEmpty ? 'Command failed' : err.trim());
@@ -748,7 +976,7 @@ class _DatabasesPageState extends State<DatabasesPage> {
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    showToast(context, msg);
   }
 
   // -- actions ---------------------------------------------------------------
@@ -813,6 +1041,9 @@ class _DatabasesPageState extends State<DatabasesPage> {
     final user = result[0].trim();
     var pass = result[1];
     if (user.isEmpty) return _snack('Username is required');
+    if (!_validIdent(user)) {
+      return _snack('Username may only contain letters, digits, _');
+    }
     if (pass.isEmpty) pass = _randomPassword();
 
     setState(() => _busy.add(db.name));
@@ -829,14 +1060,44 @@ class _DatabasesPageState extends State<DatabasesPage> {
   }
 
   Future<void> _deleteDatabase(DbInfo db) async {
-    final dropUser = db.users.isNotEmpty;
+    // Only drop users whose schema privileges are limited to this database,
+    // so accounts shared with other databases are preserved.
+    final droppable = <String>[];
+    final shared = <String>[];
+    try {
+      final rows = await _sql(
+        'SELECT GRANTEE, TABLE_SCHEMA FROM information_schema.SCHEMA_PRIVILEGES;',
+      );
+      final map = <String, Set<String>>{};
+      for (final line in rows.split('\n')) {
+        final parts = line.split('\t');
+        if (parts.length < 2) continue;
+        final m = RegExp(r"^'([^']+)'@").firstMatch(parts[0].trim());
+        if (m == null) continue;
+        map.putIfAbsent(m.group(1)!, () => <String>{}).add(parts[1].trim());
+      }
+      for (final u in db.users) {
+        final schemas = map[u] ?? <String>{};
+        if (schemas.difference({db.name}).isEmpty) {
+          droppable.add(u);
+        } else {
+          shared.add(u);
+        }
+      }
+    } catch (_) {
+      shared.addAll(db.users);
+    }
+
+    if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Delete database "${db.name}"?'),
         content: Text(
           'This permanently drops the database and all its data.'
-          '${dropUser ? '\n\nThe user "${db.users.first}" will also be dropped.' : ''}',
+          '${droppable.isNotEmpty ? '\n\nUsers to drop: ${droppable.join(', ')}' : ''}'
+          '${shared.isNotEmpty ? '\n\nKept (shared with other databases): '
+              '${shared.join(', ')}' : ''}',
         ),
         actions: [
           TextButton(
@@ -858,7 +1119,7 @@ class _DatabasesPageState extends State<DatabasesPage> {
     setState(() => _busy.add(db.name));
     try {
       var sql = 'DROP DATABASE IF EXISTS ${_ident(db.name)};';
-      for (final u in db.users) {
+      for (final u in droppable) {
         sql += "DROP USER IF EXISTS '$u'@'localhost';";
       }
       sql += 'FLUSH PRIVILEGES;';
@@ -882,48 +1143,54 @@ class _DatabasesPageState extends State<DatabasesPage> {
     required String title,
     required List<_FormField> fields,
     required String submitLabel,
-  }) {
+  }) async {
     final controllers =
         fields.map((f) => TextEditingController(text: f.initial)).toList();
-    return showDialog<List<String>>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var i = 0; i < fields.length; i++) ...[
-                if (i > 0) const SizedBox(height: 12),
-                TextField(
-                  controller: controllers[i],
-                  obscureText: fields[i].obscure,
-                  decoration: InputDecoration(
-                    labelText: fields[i].label,
-                    hintText: fields[i].hint,
-                    border: const OutlineInputBorder(),
+    try {
+      return await showDialog<List<String>>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < fields.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 12),
+                  TextField(
+                    controller: controllers[i],
+                    obscureText: fields[i].obscure,
+                    decoration: InputDecoration(
+                      labelText: fields[i].label,
+                      hintText: fields[i].hint,
+                      border: const OutlineInputBorder(),
+                    ),
                   ),
-                ),
+                ],
               ],
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(
-              context,
-              controllers.map((c) => c.text).toList(),
             ),
-            child: Text(submitLabel),
           ),
-        ],
-      ),
-    );
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                context,
+                controllers.map((c) => c.text).toList(),
+              ),
+              child: Text(submitLabel),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      for (final c in controllers) {
+        c.dispose();
+      }
+    }
   }
 
   // -- build -----------------------------------------------------------------
@@ -1049,6 +1316,7 @@ class _BackupsPageState extends State<BackupsPage> {
   List<String> _databases = [];
   String _selected = _allLabel;
   List<File> _files = [];
+  String _schedule = '';
   bool _running = false;
 
   @override
@@ -1060,12 +1328,18 @@ class _BackupsPageState extends State<BackupsPage> {
 
   Future<void> _loadDatabases() async {
     try {
-      final p = await Process.start('sudo', ['mariadb', '-N', '-B']);
+      final p = await Process.start('sudo', ['-n', 'mariadb', '-N', '-B']);
       p.stdin.write('SELECT SCHEMA_NAME FROM information_schema.SCHEMATA;');
       await p.stdin.close();
-      final out = await p.stdout.transform(utf8.decoder).join();
-      await p.stderr.drain();
-      await p.exitCode;
+      final outFuture = p.stdout.transform(utf8.decoder).join();
+      final errFuture = p.stderr.transform(utf8.decoder).join();
+      final out = await outFuture;
+      final err = await errFuture;
+      final code = await p.exitCode;
+      if (code != 0) {
+        _snack('Could not list databases: ${err.trim()}');
+        return;
+      }
       final dbs = out
           .split('\n')
           .map((l) => l.trim())
@@ -1073,7 +1347,9 @@ class _BackupsPageState extends State<BackupsPage> {
           .toList()
         ..sort();
       if (mounted) setState(() => _databases = dbs);
-    } catch (_) {}
+    } catch (e) {
+      _snack('Could not list databases: $e');
+    }
   }
 
   Future<void> _load() async {
@@ -1088,12 +1364,31 @@ class _BackupsPageState extends State<BackupsPage> {
         .cast<File>()
         .toList();
     files.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
-    if (mounted) setState(() => _files = files);
+
+    var schedule = '';
+    try {
+      final cron = File('/etc/cron.d/mariadb-backup');
+      if (await cron.exists()) {
+        for (final line in (await cron.readAsString()).split('\n')) {
+          final t = line.trim();
+          if (t.isEmpty || t.startsWith('#')) continue;
+          schedule = t.split(RegExp(r'\s+')).take(5).join(' ');
+          break;
+        }
+      }
+    } catch (_) {}
+
+    if (mounted) {
+      setState(() {
+        _files = files;
+        _schedule = schedule;
+      });
+    }
   }
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    showToast(context, msg);
   }
 
   Future<void> _backupNow() async {
@@ -1172,9 +1467,10 @@ class _BackupsPageState extends State<BackupsPage> {
           ],
         ),
         const SizedBox(height: 6),
-        const Text(
-          'Encrypted AES-256-CBC • Retention 30 days • Weekly Monday 02:00',
-          style: TextStyle(color: Colors.grey),
+        Text(
+          'Encrypted AES-256-CBC • Retention 30 days'
+          '${_schedule.isEmpty ? '' : ' • Schedule: $_schedule'}',
+          style: const TextStyle(color: Colors.grey),
         ),
         const SizedBox(height: 12),
         YaruBorderContainer(
@@ -1286,7 +1582,7 @@ class _RestorePageState extends State<RestorePage> {
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    showToast(context, msg);
   }
 
   String _dbLabel(String name) {
@@ -1337,6 +1633,7 @@ class _RestorePageState extends State<RestorePage> {
     );
     if (confirmed != true) return;
 
+    if (!mounted) return;
     setState(() {
       _restoring = true;
       _log = 'Restoring $path …';
@@ -1349,6 +1646,7 @@ class _RestorePageState extends State<RestorePage> {
         path,
       ]);
       final out = '${r.stdout}${r.stderr}'.trim();
+      if (!mounted) return;
       if (r.exitCode != 0) {
         setState(() => _log = 'Restore FAILED:\n$out');
         _snack('Restore failed');
@@ -1357,7 +1655,7 @@ class _RestorePageState extends State<RestorePage> {
         _snack('Restored ${path.split('/').last}');
       }
     } catch (e) {
-      setState(() => _log = 'Restore FAILED:\n$e');
+      if (mounted) setState(() => _log = 'Restore FAILED:\n$e');
       _snack('Restore failed: $e');
     }
 
@@ -1486,19 +1784,236 @@ class _ConfigsPageState extends State<ConfigsPage> {
   static final configFiles = <String, String>{
     'Nginx Main Config': '/etc/nginx/nginx.conf',
     'Nginx Site Config': '/etc/nginx/sites-available/demoweb.local',
-    '.env File': '/var/www/websites/demoweb.local/.env',
+    'Websites List': '/etc/nginx/websites.json',
     'php.ini': '/etc/php/8.5/fpm/php.ini',
     'my.cnf': '/etc/mysql/mariadb.conf.d/50-server.cnf',
   };
 
+  static const _gateJsonPath = '/etc/nginx/phpmyadmin-gate.json';
+  static const _gateTab = 'phpMyAdmin Gate';
+
   String? _selected;
   String _content = '';
   bool _loading = true;
+  GateCreds? _gate;
+  bool _showGatePassword = false;
+  final _editor = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _select(configFiles.keys.first);
+    _loadGate();
+  }
+
+  Future<void> _loadGate() async {
+    var content = '';
+    try {
+      final file = File(_gateJsonPath);
+      if (await file.exists()) content = await file.readAsString();
+    } catch (_) {}
+    // Root-only file: fall back to a privileged read.
+    if (content.trim().isEmpty) {
+      final r = await Process.run('sudo', ['-n', 'cat', _gateJsonPath]);
+      if (r.exitCode == 0) content = r.stdout.toString();
+    }
+    if (content.trim().isEmpty) return;
+    GateCreds? gate;
+    try {
+      final decoded = jsonDecode(content);
+      if (decoded is Map) {
+        gate = GateCreds(
+          name: (decoded['name'] ?? 'phpMyAdmin').toString(),
+          url: (decoded['url'] ?? '').toString(),
+          realm: (decoded['realm'] ?? '').toString(),
+          user: (decoded['user'] ?? '').toString(),
+          password: (decoded['password'] ?? '').toString(),
+        );
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _gate = gate);
+  }
+
+  Future<void> _openGateInBrowser() async {
+    final gate = _gate;
+    if (gate == null) return;
+    final raw = gate.url.isNotEmpty ? gate.url : 'https://$serverIp/phpmyadmin';
+    final url =
+        raw.replaceAll('{serverIp}', serverIp).replaceAll('{ip}', serverIp);
+    await Process.run('xdg-open', [url]);
+  }
+
+  void _copy(String label, String value) {
+    Clipboard.setData(ClipboardData(text: value));
+    showToast(context, '$label copied to clipboard');
+  }
+
+  static const _htpasswdPath = '/etc/nginx/.nginix-htpasswd';
+
+  Future<void> _openGateFolder() async {
+    final dir = Directory(_gateJsonPath).parent.path;
+    final target = await Directory(dir).exists() ? dir : '/etc/nginx';
+    await Process.run('xdg-open', [target]);
+    if (mounted) showToast(context, 'Opening $target');
+  }
+
+  String _randomPassword() {
+    final rnd = Random.secure();
+    const chars =
+        'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    return List.generate(18, (_) => chars[rnd.nextInt(chars.length)]).join();
+  }
+
+  Future<void> _promptChangeGatePassword() async {
+    final gate = _gate;
+    if (gate == null) return;
+    final controller = TextEditingController(text: _randomPassword());
+    var obscure = true;
+    final newPass = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Change phpMyAdmin gate password'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('User: ${gate.user}'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                obscureText: obscure,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: 'New password',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Generate',
+                        onPressed: () => setDialogState(
+                            () => controller.text = _randomPassword()),
+                        icon: const Icon(Icons.casino),
+                      ),
+                      IconButton(
+                        tooltip: obscure ? 'Show' : 'Hide',
+                        onPressed: () =>
+                            setDialogState(() => obscure = !obscure),
+                        icon: Icon(
+                            obscure ? Icons.visibility : Icons.visibility_off),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Updates the nginx login (.nginix-htpasswd) and '
+                'phpmyadmin-gate.json.',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, controller.text),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+    if (newPass == null || newPass.isEmpty) return;
+    await _changeGatePassword(newPass);
+  }
+
+  Future<void> _changeGatePassword(String newPassword) async {
+    final gate = _gate;
+    if (gate == null) return;
+    final stamp = DateTime.now().microsecondsSinceEpoch;
+
+    final hashRes =
+        await Process.run('openssl', ['passwd', '-apr1', newPassword]);
+    if (hashRes.exitCode != 0) {
+      _snack('Failed to hash password');
+      return;
+    }
+    final hash = hashRes.stdout.toString().trim();
+
+    final tmpHt =
+        File('${Directory.systemTemp.path}/nginix_htpasswd_$stamp.tmp');
+    final tmpJson =
+        File('${Directory.systemTemp.path}/nginix_gate_$stamp.json');
+
+    var ok = true;
+    try {
+      await tmpHt.writeAsString('${gate.user}:$hash\n');
+      await tmpJson.writeAsString(
+          '${const JsonEncoder.withIndent('  ').convert({
+            'name': gate.name,
+            'url': gate.url,
+            'realm': gate.realm,
+            'user': gate.user,
+            'password': newPassword,
+          })}\n');
+
+      final cp1 = await Process.run('sudo', ['-n', 'cp', tmpHt.path, _htpasswdPath]);
+      final cp2 = await Process
+          .run('sudo', ['-n', 'cp', tmpJson.path, _gateJsonPath]);
+      if (cp1.exitCode != 0 || cp2.exitCode != 0) {
+        ok = false;
+      } else {
+        await Process.run(
+            'sudo', ['-n', 'chmod', '640', _htpasswdPath]);
+        await Process.run(
+            'sudo', ['-n', 'chown', 'root:www-data', _htpasswdPath]);
+        await Process.run('sudo', ['-n', 'chmod', '600', _gateJsonPath]);
+        await Process.run('sudo', ['-n', 'chown', 'root:root', _gateJsonPath]);
+      }
+    } catch (_) {
+      ok = false;
+    } finally {
+      try {
+        await tmpHt.delete();
+      } catch (_) {}
+      try {
+        await tmpJson.delete();
+      } catch (_) {}
+    }
+
+    if (!ok) {
+      _snack('Failed to update gate password');
+      return;
+    }
+    if (mounted) {
+      setState(() => _gate = GateCreds(
+            name: gate.name,
+            url: gate.url,
+            realm: gate.realm,
+            user: gate.user,
+            password: newPassword,
+          ));
+    }
+    _snack('Gate password updated');
+  }
+
+  @override
+  void dispose() {
+    _editor.dispose();
+    super.dispose();
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    showToast(context, msg);
   }
 
   Future<void> _select(String name) async {
@@ -1506,11 +2021,19 @@ class _ConfigsPageState extends State<ConfigsPage> {
       _selected = name;
       _loading = true;
     });
+    if (name == _gateTab) {
+      await _loadGate();
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
     final path = configFiles[name]!;
     final content = await _readFile(path);
     if (mounted) {
       setState(() {
         _content = content;
+        _editor.text = content;
+        _editor.selection =
+            TextSelection.collapsed(offset: content.length);
         _loading = false;
       });
     }
@@ -1523,7 +2046,7 @@ class _ConfigsPageState extends State<ConfigsPage> {
         return await file.readAsString();
       }
     } catch (_) {}
-    // Fall back to privileged read for root-only files (e.g. .env).
+    // Fall back to privileged read for root-only files.
     final r = await Process.run('sudo', ['-n', 'cat', path]);
     if (r.exitCode == 0) return r.stdout.toString();
     return '';
@@ -1531,34 +2054,39 @@ class _ConfigsPageState extends State<ConfigsPage> {
 
   Future<void> _save() async {
     final path = configFiles[_selected]!;
-    final tmp = '/tmp/_config_write.tmp';
-    await File(tmp).writeAsString(_content);
-    await Process.run('sudo', ['cp', tmp, path]);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved: $path')),
-      );
+    final tmpFile = File('${Directory.systemTemp.path}/config_write_'
+        '${DateTime.now().microsecondsSinceEpoch}.tmp');
+    try {
+      await tmpFile.writeAsString(_content);
+      final r = await Process.run('sudo', ['-n', 'cp', tmpFile.path, path]);
+      if (r.exitCode == 0) {
+        _snack('Saved: $path');
+      } else {
+        _snack('Save failed: ${'${r.stdout}${r.stderr}'.trim()}');
+      }
+    } catch (e) {
+      _snack('Save failed: $e');
+    } finally {
+      try {
+        await tmpFile.delete();
+      } catch (_) {}
     }
   }
 
   Future<void> _testNginx() async {
-    final r = await Process.run('sudo', ['nginx', '-t']);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-              'Test: ${r.stdout.isNotEmpty ? r.stdout : r.stderr}'.trim()),
-        ),
-      );
-    }
+    final r = await Process.run('sudo', ['-n', 'nginx', '-t']);
+    if (!mounted) return;
+    final out = '${r.stdout}${r.stderr}'.trim();
+    _snack(r.exitCode == 0 ? 'Test OK: $out' : 'Test failed: $out');
   }
 
   Future<void> _reloadNginx() async {
-    await Process.run('sudo', ['systemctl', 'reload', 'nginx']);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nginx reloaded')),
-      );
+    final r = await Process.run('sudo', ['-n', 'systemctl', 'reload', 'nginx']);
+    if (!mounted) return;
+    if (r.exitCode == 0) {
+      _snack('Nginx reloaded');
+    } else {
+      _snack('Reload failed: ${'${r.stdout}${r.stderr}'.trim()}');
     }
   }
 
@@ -1572,9 +2100,7 @@ class _ConfigsPageState extends State<ConfigsPage> {
     }
     await Process.run('xdg-open', [dir]);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Opening $dir')),
-      );
+      showToast(context, 'Opening $dir');
     }
   }
 
@@ -1583,10 +2109,115 @@ class _ConfigsPageState extends State<ConfigsPage> {
     final target = await dir.exists() ? dir.path : '/etc/nginx';
     await Process.run('xdg-open', [target]);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Opening $target')),
-      );
+      showToast(context, 'Opening $target');
     }
+  }
+
+  Widget _buildGateCard() {
+    final gate = _gate!;
+    final scheme = Theme.of(context).colorScheme;
+    final url = gate.url.isNotEmpty ? gate.url : 'https://{serverIp}/phpmyadmin';
+    return YaruBorderContainer(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.lock_outline, size: 20, color: scheme.primary),
+                const SizedBox(width: 8),
+                Text('${gate.name} Gate Login',
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                IconButton(
+                  tooltip: 'Open gate folder',
+                  onPressed: _openGateFolder,
+                  icon: const Icon(Icons.folder_open),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _promptChangeGatePassword,
+                  icon: const Icon(Icons.password, size: 18),
+                  label: const Text('Change Password'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.tonalIcon(
+                  onPressed: _openGateInBrowser,
+                  icon: const Icon(Icons.open_in_new, size: 18),
+                  label: const Text('Open'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'nginx login (realm "${gate.realm}") requested before the '
+              'phpMyAdmin database login.',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
+            _gateRow('URL', url),
+            _gateRow('Username', gate.user),
+            Row(
+              children: [
+                SizedBox(
+                  width: 90,
+                  child: Text('Password',
+                      style: TextStyle(color: scheme.onSurfaceVariant)),
+                ),
+                Expanded(
+                  child: Text(
+                    _showGatePassword ? gate.password : '••••••••',
+                    style: const TextStyle(fontFamily: 'monospace'),
+                  ),
+                ),
+                IconButton(
+                  tooltip: _showGatePassword ? 'Hide' : 'Show',
+                  onPressed: () => setState(
+                      () => _showGatePassword = !_showGatePassword),
+                  icon: Icon(_showGatePassword
+                      ? Icons.visibility_off
+                      : Icons.visibility),
+                ),
+                IconButton(
+                  tooltip: 'Copy username & password',
+                  onPressed: () =>
+                      _copy('Login', '${gate.user} / ${gate.password}'),
+                  icon: const Icon(Icons.copy),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _gateRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 90,
+            child: Text(
+              label,
+              style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+          ),
+          Expanded(
+            child:
+                Text(value, style: const TextStyle(fontFamily: 'monospace')),
+          ),
+          IconButton(
+            tooltip: 'Copy $label',
+            onPressed: () => _copy(label, value),
+            icon: const Icon(Icons.copy, size: 18),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -1615,7 +2246,11 @@ class _ConfigsPageState extends State<ConfigsPage> {
           ),
           const SizedBox(height: 4),
           Text(
-            _selected == null ? '' : configFiles[_selected] ?? '',
+            _selected == null
+                ? ''
+                : (_selected == _gateTab
+                    ? _gateJsonPath
+                    : configFiles[_selected] ?? ''),
             style: const TextStyle(
               fontFamily: 'monospace',
               fontSize: 12,
@@ -1626,7 +2261,7 @@ class _ConfigsPageState extends State<ConfigsPage> {
           Wrap(
             spacing: 8,
             children: [
-              for (final name in configFiles.keys)
+              for (final name in [...configFiles.keys, _gateTab])
                 ChoiceChip(
                   label: Text(name),
                   selected: _selected == name,
@@ -1636,47 +2271,52 @@ class _ConfigsPageState extends State<ConfigsPage> {
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: _loading
-                ? const Center(child: YaruCircularProgressIndicator())
-                : YaruBorderContainer(
-                    child: Scrollbar(
-                      child: TextField(
-                        controller: TextEditingController(text: _content)
-                          ..selection =
-                              TextSelection.collapsed(offset: _content.length),
-                        onChanged: (v) => _content = v,
-                        maxLines: null,
-                        expands: true,
-                        style: const TextStyle(
-                            fontFamily: 'monospace', fontSize: 13),
-                        decoration:
-                            const InputDecoration(border: InputBorder.none),
+            child: _selected == _gateTab
+                ? (_gate == null
+                    ? const Center(
+                        child: Text('No phpmyadmin-gate.json found.'))
+                    : SingleChildScrollView(child: _buildGateCard()))
+                : _loading
+                    ? const Center(child: YaruCircularProgressIndicator())
+                    : YaruBorderContainer(
+                        child: Scrollbar(
+                          child: TextField(
+                            controller: _editor,
+                            onChanged: (v) => _content = v,
+                            maxLines: null,
+                            expands: true,
+                            style: const TextStyle(
+                                fontFamily: 'monospace', fontSize: 13),
+                            decoration: const InputDecoration(
+                                border: InputBorder.none),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              FilledButton.icon(
-                onPressed: _save,
-                icon: const Icon(Icons.save, size: 18),
-                label: const Text('Save File'),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: _testNginx,
-                icon: const Icon(Icons.check, size: 18),
-                label: const Text('Test Nginx'),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: _reloadNginx,
-                icon: const Icon(Icons.restart_alt, size: 18),
-                label: const Text('Reload Nginx'),
-              ),
-            ],
-          ),
+          if (_selected != _gateTab) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                FilledButton.icon(
+                  onPressed: _save,
+                  icon: const Icon(Icons.save, size: 18),
+                  label: const Text('Save File'),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _testNginx,
+                  icon: const Icon(Icons.check, size: 18),
+                  label: const Text('Test Nginx'),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _reloadNginx,
+                  icon: const Icon(Icons.restart_alt, size: 18),
+                  label: const Text('Reload Nginx'),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -1713,7 +2353,7 @@ class _TerminalPageState extends State<TerminalPage> {
 
   Future<void> _run(String name, String cmd) async {
     setState(() => _log.add('\n═══ $name: $cmd ═══'));
-    final r = await Process.run('sh', ['-c', cmd]);
+    final r = await Process.run('sudo', ['-n', 'sh', '-c', cmd]);
     final out = '${r.stdout}\n${r.stderr}';
     if (mounted) {
       setState(() => _log.add(out.isEmpty ? '(no output)' : out));
@@ -1726,6 +2366,12 @@ class _TerminalPageState extends State<TerminalPage> {
     if (_scroll.hasClients) {
       _scroll.jumpTo(_scroll.position.maxScrollExtent);
     }
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
   }
 
   @override
@@ -1816,7 +2462,7 @@ class _NetworkPageState extends State<NetworkPage> {
   }
 
   static String _prefixToMask(int prefix) {
-    if (prefix <= 0 || prefix >= 32) return '';
+    if (prefix < 0 || prefix > 32) return '';
     final mask = 0xFFFFFFFF << (32 - prefix);
     return '${(mask >> 24) & 255}.${(mask >> 16) & 255}.${(mask >> 8) & 255}.${mask & 255}';
   }
@@ -1892,12 +2538,14 @@ class _NetworkPageState extends State<NetworkPage> {
       }
     }
 
-    final conn = await Process.run('nmcli', ['-t', '-f', 'STATE', 'networking']);
+    final conn = await Process.run('nmcli', ['-t', 'networking']);
     if (conn.exitCode == 0 &&
         conn.stdout.toString().trim().toLowerCase() == 'enabled') {
       final up =
-          await Process.run('nmcli', ['-t', '-f', 'RUNNING', 'networking']);
-      status = up.stdout.toString().trim() == 'yes' ? 'Connected' : 'Offline';
+          await Process.run('nmcli', ['-t', '-f', 'RUNNING', 'general']);
+      status = up.stdout.toString().trim().toLowerCase() == 'running'
+          ? 'Connected'
+          : (ip.isNotEmpty ? 'Connected' : 'Offline');
     } else {
       status = ip.isNotEmpty ? 'Connected' : 'Offline';
     }
@@ -2057,6 +2705,7 @@ class _FirewallPageState extends State<FirewallPage> {
   bool? _chkReach;
 
   UfwStatus? _status;
+  String? _error;
   bool _loading = true;
   bool _busy = false;
 
@@ -2077,12 +2726,6 @@ class _FirewallPageState extends State<FirewallPage> {
 
   static Set<int> _portsFor(String to) {
     final t = to.trim();
-    final range = RegExp(r'^(\d+)(?::(\d+))?/(tcp|udp)$').firstMatch(t);
-    if (range != null) {
-      final a = int.parse(range.group(1)!);
-      final b = range.group(2) != null ? int.parse(range.group(2)!) : a;
-      return {for (var p = a; p <= b; p++) p};
-    }
     final lower = t.toLowerCase();
     if (lower.contains('nginx full') || lower.contains('www full')) {
       return {80, 443};
@@ -2090,17 +2733,45 @@ class _FirewallPageState extends State<FirewallPage> {
     if (lower.contains('nginx https')) return {443};
     if (lower.contains('nginx http') || lower == 'www') return {80};
     if (lower.contains('openssh') || lower == 'ssh') return {22};
-    return {};
+
+    // Numeric specs, including comma lists ("80,443/tcp") and ranges.
+    final ports = <int>{};
+    final body = t.replaceAll(RegExp(r'/(tcp|udp)$', caseSensitive: false), '');
+    for (final part in body.split(',')) {
+      final p = part.trim();
+      final range = RegExp(r'^(\d+)(?::(\d+))?$').firstMatch(p);
+      if (range == null) continue;
+      final a = int.parse(range.group(1)!);
+      final b = range.group(2) != null ? int.parse(range.group(2)!) : a;
+      if (a > b || a > 65535) continue;
+      for (var port = a; port <= b && port <= 65535; port++) {
+        ports.add(port);
+      }
+    }
+    return ports;
   }
 
   Future<void> _load() async {
     setState(() => _loading = true);
+    _error = null;
     bool active = false;
     final rules = <UfwRule>[];
     final openTcp = <int>{};
 
     final r = await Process.run('sudo', ['-n', 'ufw', 'status']);
     final out = '${r.stdout}${r.stderr}';
+    if (r.exitCode != 0) {
+      if (mounted) {
+        setState(() {
+          _status = null;
+          _error = r.stderr.toString().trim().isEmpty
+              ? 'ufw status failed (exit ${r.exitCode})'
+              : r.stderr.toString().trim();
+          _loading = false;
+        });
+      }
+      return;
+    }
     if (out.toLowerCase().contains('status: active')) active = true;
 
     final lineRe =
@@ -2142,7 +2813,7 @@ class _FirewallPageState extends State<FirewallPage> {
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    showToast(context, msg);
   }
 
   Future<void> _ufw(List<String> args, String okMsg) async {
@@ -2186,20 +2857,62 @@ class _FirewallPageState extends State<FirewallPage> {
       return;
     }
     setState(() => _busy = true);
+    final errors = <String>[];
     for (final spec in specs) {
-      await Process.run('sudo', ['-n', 'ufw', 'delete', 'allow', spec]);
+      final r =
+          await Process.run('sudo', ['-n', 'ufw', 'delete', 'allow', spec]);
+      if (r.exitCode != 0) {
+        errors.add('${r.stdout}${r.stderr}'.trim());
+      }
     }
-    _snack('Closed port $port/tcp');
     await _load();
     if (mounted) setState(() => _busy = false);
+    if (errors.isEmpty) {
+      _snack('Closed port $port/tcp');
+    } else {
+      _snack('Close failed: ${errors.where((e) => e.isNotEmpty).join('; ')}');
+    }
   }
 
   Future<void> _enableFirewall() async {
     setState(() => _busy = true);
-    await Process.run('sudo', ['-n', 'ufw', 'allow', 'OpenSSH']);
-    await Process.run('sudo', ['-n', 'ufw', 'allow', 'Nginx Full']);
-    await Process.run('sudo', ['-n', 'ufw', '--force', 'enable']);
-    _snack('Firewall enabled (SSH, HTTP, HTTPS allowed)');
+    // Always allow web traffic first; abort if this fails so we never enable
+    // an incomplete rule set.
+    final ng = await Process.run('sudo', ['-n', 'ufw', 'allow', 'Nginx Full']);
+    if (ng.exitCode != 0) {
+      final err = '${ng.stdout}${ng.stderr}'.trim();
+      _snack('Could not allow Nginx Full'
+          '${err.isEmpty ? '' : ': $err'} — firewall not enabled');
+      await _load();
+      if (mounted) setState(() => _busy = false);
+      return;
+    }
+
+    // Allow SSH so remote access is not cut off: use the OpenSSH profile when
+    // available, otherwise allow port 22 only if an SSH server is running.
+    final allowed = <String>['HTTP', 'HTTPS'];
+    final apps = await Process.run('sudo', ['-n', 'ufw', 'app', 'list']);
+    if (apps.stdout.toString().contains('OpenSSH')) {
+      await Process.run('sudo', ['-n', 'ufw', 'allow', 'OpenSSH']);
+      allowed.add('SSH');
+    } else {
+      final ssh = await Process.run('sh', [
+        '-c',
+        'systemctl is-active --quiet ssh || systemctl is-active --quiet sshd',
+      ]);
+      if (ssh.exitCode == 0) {
+        await Process.run('sudo', ['-n', 'ufw', 'allow', '22/tcp']);
+        allowed.add('SSH');
+      }
+    }
+
+    final r = await Process.run('sudo', ['-n', 'ufw', '--force', 'enable']);
+    if (r.exitCode != 0) {
+      final err = '${r.stdout}${r.stderr}'.trim();
+      _snack('Enable failed${err.isEmpty ? '' : ': $err'}');
+    } else {
+      _snack('Firewall enabled (${allowed.join(', ')} allowed)');
+    }
     await _load();
     if (mounted) setState(() => _busy = false);
   }
@@ -2358,7 +3071,11 @@ class _FirewallPageState extends State<FirewallPage> {
                   size: 18,
                   color: active ? Colors.green.shade700 : errorColor,
                 ),
-                label: Text(active ? 'Active' : 'Inactive'),
+                label: Text(_error != null
+                    ? 'Unknown'
+                    : active
+                        ? 'Active'
+                        : 'Inactive'),
               ),
             const Spacer(),
             if (_busy || _loading)
@@ -2375,7 +3092,20 @@ class _FirewallPageState extends State<FirewallPage> {
         const Text('Manage the UFW firewall (ports 80/443 and custom rules).',
             style: TextStyle(color: Colors.grey)),
         const SizedBox(height: 12),
-        if (!_loading && !active)
+        if (!_loading && _error != null)
+          YaruBorderContainer(
+            child: ListTile(
+              leading: Icon(Icons.error_outline, color: errorColor),
+              title: const Text('Unable to read firewall status'),
+              subtitle: Text(_error!),
+              trailing: TextButton(
+                onPressed: _busy ? null : _load,
+                child: const Text('Retry'),
+              ),
+            ),
+          ),
+        if (!_loading && _error != null) const SizedBox(height: 12),
+        if (!_loading && _error == null && !active)
           YaruBorderContainer(
             child: ListTile(
               leading: Icon(Icons.warning_amber, color: errorColor),
@@ -2389,7 +3119,7 @@ class _FirewallPageState extends State<FirewallPage> {
               ),
             ),
           ),
-        if (!_loading && !active) const SizedBox(height: 12),
+        if (!_loading && _error == null && !active) const SizedBox(height: 12),
         YaruBorderContainer(
           child: Column(
             children: [
@@ -2631,18 +3361,23 @@ class _CronJobsPageState extends State<CronJobsPage> {
   }
 
   Future<String> _sql(String sql) async {
-    final p = await Process.start('sudo', ['mariadb', '-N', '-B']);
+    final p = await Process.start('sudo', ['-n', 'mariadb', '-N', '-B']);
     p.stdin.write(sql);
     await p.stdin.close();
-    final out = await p.stdout.transform(utf8.decoder).join();
-    await p.stderr.drain();
-    await p.exitCode;
+    final outFuture = p.stdout.transform(utf8.decoder).join();
+    final errFuture = p.stderr.transform(utf8.decoder).join();
+    final out = await outFuture;
+    final err = await errFuture;
+    final code = await p.exitCode;
+    if (code != 0) {
+      throw Exception(err.trim().isEmpty ? 'Command failed' : err.trim());
+    }
     return out.trim();
   }
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    showToast(context, msg);
   }
 
   Future<void> _load() async {
@@ -2738,8 +3473,8 @@ class _CronJobsPageState extends State<CronJobsPage> {
 
   Future<void> _save() async {
     final sched = _schedule;
-    if (sched.split(RegExp(r'\s+')).length != 5) {
-      _snack('Schedule must be a 5-field cron expression');
+    if (!RegExp(r'^[\d*,/\-]+(\s+[\d*,/\-]+){4}$').hasMatch(sched)) {
+      _snack('Schedule must be a valid 5-field cron expression');
       return;
     }
     if (!_all && _selected.isEmpty) {
@@ -2747,19 +3482,28 @@ class _CronJobsPageState extends State<CronJobsPage> {
       return;
     }
     setState(() => _saving = true);
+    final tmp = File('${Directory.systemTemp.path}/cron_write_'
+        '${DateTime.now().microsecondsSinceEpoch}.tmp');
     try {
-      final tmp = '/tmp/_cron_write.tmp';
-      await File(tmp).writeAsString(_preview());
-      final r = await Process.run('sudo', ['cp', tmp, _cronPath]);
-      await Process.run('sudo', ['chmod', '644', _cronPath]);
-      if (r.exitCode != 0) {
-        _snack('Failed to write cron file');
+      await tmp.writeAsString(_preview());
+      final cp = await Process.run('sudo', ['-n', 'cp', tmp.path, _cronPath]);
+      if (cp.exitCode != 0) {
+        _snack('Failed to write cron file: ${cp.stderr.toString().trim()}');
       } else {
-        _snack('Backup schedule saved');
-        await _load();
+        final ch = await Process.run('sudo', ['-n', 'chmod', '644', _cronPath]);
+        if (ch.exitCode != 0) {
+          _snack('Could not set permissions: ${ch.stderr.toString().trim()}');
+        } else {
+          _snack('Backup schedule saved');
+          await _load();
+        }
       }
     } catch (e) {
       _snack('Failed: $e');
+    } finally {
+      try {
+        await tmp.delete();
+      } catch (_) {}
     }
     if (mounted) setState(() => _saving = false);
   }

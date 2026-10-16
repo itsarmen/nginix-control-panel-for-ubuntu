@@ -1,7 +1,9 @@
 [Desktop Entry]
 Type=Application
 Name=Nginix Control Panel
+Comment=Nginix Control Panel
 Exec=/opt/nginix-control-panel/nginix-control-panel
 Icon=app-icon
-Categories=Utility;
+Categories=System;Monitor;
 Terminal=false
+StartupWMClass=com.nginix.controlpanel

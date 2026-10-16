@@ -46,11 +46,10 @@ def main():
     img = center_crop_square(img)
     for size in SIZES:
         icon = img.resize((size, size), Image.LANCZOS)
-        for sub in (f"{size}x{size}", str(size)):
-            path = os.path.join(icon_dir, sub, "apps", "nginix-control-panel.png")
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            icon.save(path)
-            print(f"wrote {path} ({size}x{size})")
+        path = os.path.join(icon_dir, f"{size}x{size}", "apps", "nginix-control-panel.png")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        icon.save(path)
+        print(f"wrote {path} ({size}x{size})")
 
     if icon_dir == ICON_DIR and sys.platform.startswith("linux") and os.geteuid() == 0:
         os.makedirs("/usr/share/pixmaps", exist_ok=True)

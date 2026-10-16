@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Launch Nginix Control Panel
+set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG=/tmp/dashboard.log
+LOG=/tmp/nginix-control-panel.log
 
 if [ -x /opt/nginix-control-panel/nginix-control-panel ]; then
   BIN=/opt/nginix-control-panel/nginix-control-panel

@@ -46,12 +46,12 @@ Description: Nginix Control Panel
  configuration files, a terminal, and network status.
 EOF
 
-cat > "$PKG/usr/share/applications/$PKG_NAME.desktop" << 'EOF'
+cat > "$PKG/usr/share/applications/com.nginix.controlpanel.desktop" << 'EOF'
 [Desktop Entry]
 Name=Nginix Control Panel
 Comment=Nginix Control Panel
 Exec=/opt/nginix-control-panel/nginix-control-panel
-Icon=/usr/share/pixmaps/nginix-control-panel.png
+Icon=nginix-control-panel
 Type=Application
 Categories=System;Monitor;
 Terminal=false

@@ -47,6 +47,22 @@ BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
 APP_DIR="${APP_DIR:-/opt/nginix-control-panel}"
 APP_SECRETS="${APP_SECRETS:-${APP_DIR}/secrets}"
 APACHE_BACKUP="/root/pre-nginx-setup-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+# App / desktop integration (paths the dashboard and GNOME expect)
+PIXMAP_PATH="/usr/share/pixmaps/nginix-control-panel.png"
+DESKTOP_FILE="/usr/share/applications/com.nginix.controlpanel.desktop"
+SUDOERS_FILE="/etc/sudoers.d/nginix-control-panel"
+LAUNCHER_LINK="/usr/local/bin/nginix-control-panel"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_BUNDLE="${APP_BUNDLE:-${REPO_DIR}/build/linux/x64/release/bundle}"
+# phpMyAdmin access gate (nginx HTTP Basic auth: the native browser popup).
+# The realm string is what shows in the login prompt.
+GATE_USER="${GATE_USER:-nginix}"
+GATE_PASS="${GATE_PASS:-}"
+GATE_REALM="${GATE_REALM:-Nginix Control Panel}"
+HTPASSWD_FILE="/etc/nginx/.nginix-htpasswd"
+GATE_CREDS="/root/.${SITE_NAME}-phpmyadmin-credentials"
+# Machine-readable copy of the gate login, read and displayed by the dashboard.
+GATE_JSON="/etc/nginx/phpmyadmin-gate.json"
 
 ASSUME_YES=0
 KEEP_DEVROW=0
@@ -90,6 +106,9 @@ This will:
   * Install & configure nginx, php${PHP_VER}-fpm, phpMyAdmin, MariaDB
   * Create the '${SITE_NAME}' site and a self-signed TLS certificate
   * Create the encrypted DB backup script + weekly cron job
+  * Protect /phpmyadmin with a Nginix login (HTTP Basic auth)
+  * Install the Nginix Control Panel app + desktop icon (if a build exists)
+  * Grant the invoking user passwordless sudo for the dashboard
 
 A backup of /var/www/devrow will be saved to:
   ${APACHE_BACKUP}
@@ -143,9 +162,11 @@ if ! apt-get update -y >/dev/null 2>&1; then
 fi
 
 log "Preseeding phpMyAdmin (no dbconfig prompts)..."
-echo "phpmyadmin phpmyadmin/dbconfig-install boolean false"        | debconf-set-selections
-echo "phpmyadmin phpmyadmin/reconfigure-webserver multiselect"    | debconf-set-selections
-echo "phpmyadmin phpmyadmin/setup-username string"                | debconf-set-selections 2>/dev/null || true
+printf '%s\n' \
+  "phpmyadmin phpmyadmin/dbconfig-install boolean false" \
+  "phpmyadmin phpmyadmin/reconfigure-webserver multiselect" \
+  "phpmyadmin phpmyadmin/setup-username string phpmyadmin" \
+  | debconf-set-selections || true
 
 log "Installing nginx, php${PHP_VER}-fpm, MariaDB, phpMyAdmin..."
 apt-get install -y --no-install-recommends \
@@ -154,7 +175,8 @@ apt-get install -y --no-install-recommends \
   "php${PHP_VER}-fpm" "php${PHP_VER}-cli" "php${PHP_VER}-mysql" \
   "php${PHP_VER}-curl" "php${PHP_VER}-mbstring" "php${PHP_VER}-xml" \
   "php${PHP_VER}-gd" "php${PHP_VER}-zip" \
-  phpmyadmin openssl ufw ca-certificates >/dev/null
+  phpmyadmin openssl ufw ca-certificates \
+  xdg-utils iproute2 procps network-manager >/dev/null
 
 # ----------------------------------------------------------------------------
 # 4. Self-signed TLS certificate (what the app reads at /etc/nginx/ssl)
@@ -248,7 +270,9 @@ server {
         fastcgi_pass unix:${PHP_SOCK};
     }
 
-    location /phpmyadmin {
+    location ^~ /phpmyadmin {
+        auth_basic "${GATE_REALM}";
+        auth_basic_user_file ${HTPASSWD_FILE};
         root /usr/share/;
         index index.php index.html;
         location ~ ^/phpmyadmin/(.+\.php)\$ {
@@ -267,6 +291,38 @@ EOF
 
 ln -sf "$NGINX_AVAIL" "$NGINX_ENABLED"
 rm -f /etc/nginx/sites-enabled/default
+
+# ----------------------------------------------------------------------------
+# 6a. phpMyAdmin login gate (nginx HTTP Basic auth)
+# ----------------------------------------------------------------------------
+if [ -z "$GATE_PASS" ]; then
+  GATE_PASS="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | cut -c1-18)"
+fi
+log "Protecting /phpmyadmin with a login (user '${GATE_USER}')..."
+printf '%s:%s\n' "$GATE_USER" "$(openssl passwd -apr1 "$GATE_PASS")" \
+  > "$HTPASSWD_FILE"
+chown root:www-data "$HTPASSWD_FILE"
+chmod 640 "$HTPASSWD_FILE"
+
+cat > "$GATE_CREDS" <<EOF
+phpMyAdmin URL : https://<server-ip>/phpmyadmin
+realm          : ${GATE_REALM}
+login user     : ${GATE_USER}
+login password : ${GATE_PASS}
+EOF
+chmod 600 "$GATE_CREDS"
+
+# JSON copy for the dashboard to read and display (root-only).
+cat > "$GATE_JSON" <<EOF
+{
+  "name": "phpMyAdmin",
+  "url": "https://{serverIp}/phpmyadmin",
+  "realm": "${GATE_REALM}",
+  "user": "${GATE_USER}",
+  "password": "${GATE_PASS}"
+}
+EOF
+chmod 600 "$GATE_JSON"
 
 # ----------------------------------------------------------------------------
 # 6b. Website list consumed by the app (/etc/nginx/websites.json)
@@ -385,7 +441,7 @@ chmod 640 "$BACKUP_LOG"
 # is preserved with the app. Root-only: never expose the key to other users.
 log "Storing key copy in ${APP_SECRETS}..."
 mkdir -p "$APP_SECRETS"
-chmod 700 "$APP_DIR/secrets"
+chmod 700 "$APP_SECRETS"
 install -m 600 -o root -g root "$BACKUP_KEY" "${APP_SECRETS}/mariadb-backup.key"
 
 cat > "$BACKUP_SCRIPT" <<'BASH'
@@ -463,12 +519,24 @@ chmod 644 /etc/cron.d/mariadb-backup
 # 10. Firewall, PHP-FPM, services, validation
 # ----------------------------------------------------------------------------
 if command -v ufw >/dev/null; then
-  log "Allowing Nginx Full through UFW..."
+  log "Configuring UFW firewall..."
   ufw allow 'Nginx Full' >/dev/null 2>&1 || true
+
+  # Allow SSH before enabling so a remote session is never locked out.
+  if ufw app list 2>/dev/null | grep -q '^ *OpenSSH$'; then
+    ufw allow OpenSSH >/dev/null 2>&1 || true
+  elif systemctl is-active --quiet ssh || systemctl is-active --quiet sshd; then
+    ufw allow 22/tcp >/dev/null 2>&1 || true
+  fi
+
+  log "Enabling UFW..."
+  ufw --force enable >/dev/null 2>&1 || warn "Could not enable UFW."
+  ufw status verbose || true
 fi
 
 log "Enabling services..."
 systemctl enable --now "php${PHP_VER}-fpm"
+systemctl enable --now cron 2>/dev/null || warn "Could not enable cron."
 
 log "Validating nginx configuration..."
 nginx -t
@@ -478,7 +546,87 @@ systemctl enable --now nginx
 systemctl restart nginx
 
 # ----------------------------------------------------------------------------
-# 11. Summary
+# 11. Install the dashboard app + desktop integration
+# ----------------------------------------------------------------------------
+APP_INSTALLED=0
+if [ -x "${APP_BUNDLE}/nginix-control-panel" ]; then
+  log "Installing Nginix Control Panel to ${APP_DIR}..."
+  mkdir -p "$APP_DIR"
+  install -m 755 "${APP_BUNDLE}/nginix-control-panel" \
+    "${APP_DIR}/nginix-control-panel"
+  rm -rf "${APP_DIR}/data" "${APP_DIR}/lib"
+  cp -r "${APP_BUNDLE}/data" "${APP_DIR}/data"
+  cp -r "${APP_BUNDLE}/lib" "${APP_DIR}/lib"
+  ln -sf "${APP_DIR}/nginix-control-panel" "$LAUNCHER_LINK"
+  APP_INSTALLED=1
+else
+  warn "Release bundle not found at ${APP_BUNDLE}."
+  warn "Skipping app binary install. Run 'flutter build linux --release' first,"
+  warn "or install the packaged .deb from dist/."
+fi
+
+# App icon (used by the desktop entry and the native window fallback).
+if [ -f "${REPO_DIR}/icon_1024.png" ]; then
+  log "Installing app icon ${PIXMAP_PATH}..."
+  mkdir -p /usr/share/pixmaps
+  install -m 644 "${REPO_DIR}/icon_1024.png" "$PIXMAP_PATH"
+fi
+if [ -d "${REPO_DIR}/linux-icons/hicolor" ]; then
+  mkdir -p /usr/share/icons/hicolor
+  cp -r "${REPO_DIR}/linux-icons/hicolor/." /usr/share/icons/hicolor/
+  if command -v gtk-update-icon-cache >/dev/null; then
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor >/dev/null 2>&1 || true
+  fi
+fi
+
+# Desktop entry. The file name MUST match the application id
+# (com.nginix.controlpanel) so GNOME/Wayland binds the window to its icon.
+if [ "$APP_INSTALLED" -eq 1 ]; then
+  log "Installing desktop entry ${DESKTOP_FILE}..."
+  cat > "$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Nginix Control Panel
+Comment=Nginix Control Panel
+Exec=${APP_DIR}/nginix-control-panel
+Icon=${PIXMAP_PATH}
+Categories=System;Monitor;
+Terminal=false
+StartupWMClass=com.nginix.controlpanel
+EOF
+  chmod 644 "$DESKTOP_FILE"
+  if command -v update-desktop-database >/dev/null; then
+    update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+  fi
+fi
+
+# Passwordless sudo for the desktop user: the app runs privileged commands
+# (systemctl, nginx -t, mariadb, ufw, config writes) via 'sudo -n'.
+TARGET_USER="${SUDO_USER:-}"
+if [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
+  log "Granting '${TARGET_USER}' passwordless sudo for the dashboard..."
+  cat > "$SUDOERS_FILE" <<EOF
+# Passwordless sudo for the Nginix Control Panel desktop user.
+# Installed by setup-server.sh - remove this file to revoke.
+${TARGET_USER} ALL=(ALL) NOPASSWD: ALL
+EOF
+  chmod 440 "$SUDOERS_FILE"
+  if ! visudo -cf "$SUDOERS_FILE" >/dev/null 2>&1; then
+    warn "Generated sudoers file is invalid; removing it."
+    rm -f "$SUDOERS_FILE"
+  fi
+else
+  warn "Could not determine the desktop user (SUDO_USER); skipping sudoers setup."
+  warn "Run the dashboard as a user with passwordless sudo."
+fi
+
+# The Network page relies on nmcli (NetworkManager).
+if ! nmcli -t general status >/dev/null 2>&1; then
+  warn "NetworkManager (nmcli) is not active; the dashboard Network page needs it."
+fi
+
+# ----------------------------------------------------------------------------
+# 12. Summary
 # ----------------------------------------------------------------------------
 SUMMARY_FILE="/root/${SITE_NAME}-setup-summary.txt"
 cat > "$SUMMARY_FILE" <<EOF
@@ -489,6 +637,9 @@ nginx vhost  : ${NGINX_AVAIL}
 Websites JSON: ${WEBSITES_JSON}
 TLS cert     : ${SSL_DIR}/server.crt
 phpMyAdmin   : https://<server-ip>/phpmyadmin
+phpMyAdmin login: ${GATE_USER} / ${GATE_PASS}   (HTTP Basic auth, realm "${GATE_REALM}")
+phpMyAdmin creds: ${GATE_CREDS}
+phpMyAdmin JSON : ${GATE_JSON}
 Site URL     : https://<server-ip>/
 DB name      : ${DB_NAME}
 DB user      : ${DB_USER}
@@ -500,6 +651,12 @@ Key copy     : ${APP_SECRETS}/mariadb-backup.key
 Backup dir   : ${BACKUP_DIR}
 Backup log   : ${BACKUP_LOG}
 Cron         : /etc/cron.d/mariadb-backup (Mon 02:00)
+Firewall     : $(ufw status 2>/dev/null | head -1)
+App binary   : ${APP_DIR}/nginix-control-panel
+Launcher     : ${LAUNCHER_LINK}
+Desktop entry: ${DESKTOP_FILE}
+App icon     : ${PIXMAP_PATH}
+Sudoers      : ${SUDOERS_FILE}  (user: ${TARGET_USER:-none})
 Restore cmd  : openssl enc -d -aes-256-cbc -pbkdf2 -pass file:${BACKUP_KEY} \\
                  -in ${BACKUP_DIR}/db-<stamp>.sql.enc | mysql
 EOF
