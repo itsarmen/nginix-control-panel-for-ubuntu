@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/readme-banner.png" alt="NGINX Control Panel for Ubuntu" width="100%">
+</p>
+
 # Nginix Control Panel
 
 A Flutter-based desktop control panel for Ubuntu servers running the
