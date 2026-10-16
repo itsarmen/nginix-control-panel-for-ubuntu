@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/readme-banner.png" alt="NGINX Control Panel for Ubuntu" width="100%">
+  <img src="banner.png" alt="NGINX Control Panel for Ubuntu" width="100%">
 </p>
 
 # Nginix Control Panel
