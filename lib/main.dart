@@ -62,9 +62,7 @@ class _Toasts {
     final data = _ToastData(message, _kindFor(message));
     _items.add(data);
     if (_entry == null) {
-      final entry = OverlayEntry(
-        builder: (_) => _ToastOverlay(items: _items),
-      );
+      final entry = OverlayEntry(builder: (_) => _ToastOverlay(items: _items));
       _entry = entry;
       overlay.insert(entry);
     } else {
@@ -130,9 +128,7 @@ class _ToastOverlay extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            for (final item in items) _ToastCard(data: item),
-          ],
+          children: [for (final item in items) _ToastCard(data: item)],
         ),
       ),
     );
@@ -166,8 +162,10 @@ class _ToastCardState extends State<_ToastCard>
     final scheme = Theme.of(context).colorScheme;
     final (Color accent, IconData icon) = switch (widget.data.kind) {
       _ToastKind.error => (const Color(0xFFE5484D), Icons.error_outline),
-      _ToastKind.success =>
-        (const Color(0xFF30A46C), Icons.check_circle_outline),
+      _ToastKind.success => (
+        const Color(0xFF30A46C),
+        Icons.check_circle_outline,
+      ),
       _ToastKind.info => (scheme.primary, Icons.info_outline),
     };
     return Padding(
@@ -186,8 +184,10 @@ class _ToastCardState extends State<_ToastCard>
               elevation: 6,
               borderRadius: BorderRadius.circular(12),
               child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -241,11 +241,7 @@ class _NginixControlPanelAppState extends State<NginixControlPanelApp> {
 }
 
 class _Dashboard extends StatefulWidget {
-  const _Dashboard({
-    required this.themeMode,
-    this.lightTheme,
-    this.darkTheme,
-  });
+  const _Dashboard({required this.themeMode, this.lightTheme, this.darkTheme});
 
   final ThemeMode themeMode;
   final ThemeData? lightTheme;
@@ -299,25 +295,37 @@ class _HomeShell extends StatelessWidget {
   final ValueChanged<int> onSelected;
   final Widget body;
 
+  static const _navItemWidth = 76.0;
+
+  static const _items = <(IconData, IconData, String)>[
+    (Icons.settings_outlined, Icons.settings, 'Services'),
+    (Icons.language_outlined, Icons.language, 'Websites'),
+    (Icons.storage_outlined, Icons.storage, 'Databases'),
+    (Icons.backup_outlined, Icons.backup, 'Backups'),
+    (Icons.settings_backup_restore, Icons.settings_backup_restore, 'Restore'),
+    (Icons.schedule_outlined, Icons.schedule, 'Cron Jobs'),
+    (Icons.code, Icons.code, 'Configs'),
+    (Icons.terminal, Icons.terminal, 'Terminal'),
+    (Icons.lan_outlined, Icons.lan, 'Network'),
+    (Icons.shield_outlined, Icons.shield, 'Firewall'),
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: YaruWindowTitleBar(
         centerTitle: false,
-leading: Padding(
-            padding: const EdgeInsets.only(left: 12, top: 6, bottom: 6),
-            child: SizedBox(
-              width: 18,
-              height: 18,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(50),
-                child: Image.asset(
-                  'assets/app-icon.png',
-                  fit: BoxFit.cover,
-                ),
-              ),
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 12, top: 6, bottom: 6),
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(50),
+              child: Image.asset('assets/app-icon.png', fit: BoxFit.cover),
             ),
           ),
+        ),
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -344,41 +352,85 @@ leading: Padding(
           ],
         ),
       ),
-      body: Row(
+      body: Column(
         children: [
-          YaruNavigationRail(
-            length: 10,
-            selectedIndex: selectedIndex,
-            leading: const SizedBox.shrink(),
-            trailing: const SizedBox.shrink(),
-            onDestinationSelected: onSelected,
-            itemBuilder: (context, index, selected) {
-              final items = [
-                (Icons.settings_outlined, Icons.settings, 'Services'),
-                (Icons.language_outlined, Icons.language, 'Websites'),
-                (Icons.storage_outlined, Icons.storage, 'Databases'),
-                (Icons.backup_outlined, Icons.backup, 'Backups'),
-                (Icons.settings_backup_restore, Icons.settings_backup_restore, 'Restore'),
-                (Icons.schedule_outlined, Icons.schedule, 'Cron Jobs'),
-                (Icons.code, Icons.code, 'Configs'),
-                (Icons.terminal, Icons.terminal, 'Terminal'),
-                (Icons.lan_outlined, Icons.lan, 'Network'),
-                (Icons.shield_outlined, Icons.shield, 'Firewall'),
-              ];
-              final icon =
-                  selected ? items[index].$2 : items[index].$1;
-              return YaruNavigationRailItem(
-                selected: selectedIndex == index,
-                icon: Icon(icon),
-                label: Text(items[index].$3),
-                onTap: () => onSelected(index),
-                style: YaruNavigationRailStyle.labelled,
-              );
-            },
+          Material(
+            color: Theme.of(context).colorScheme.surface,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: LayoutBuilder(
+                builder: (context, constraints) => SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        for (final (i, item) in _items.indexed)
+                          SizedBox(
+                            width: _navItemWidth,
+                            child: _TopNavItem(
+                              icon: selectedIndex == i ? item.$2 : item.$1,
+                              label: item.$3,
+                              selected: selectedIndex == i,
+                              onTap: () => onSelected(i),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
-          const VerticalDivider(width: 1),
+          const Divider(height: 1),
           Expanded(child: body),
         ],
+      ),
+    );
+  }
+}
+
+class _TopNavItem extends StatelessWidget {
+  const _TopNavItem({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        height: 58,
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? scheme.onSurface.withValues(alpha: 0.1) : null,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 20),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11, height: 1.1),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -441,8 +493,7 @@ class _ServicesPageState extends State<ServicesPage> {
     if (mounted) setState(() => _busy[service] = true);
     String? err;
     try {
-      final r =
-          await Process.run('sudo', ['-n', 'systemctl', action, service]);
+      final r = await Process.run('sudo', ['-n', 'systemctl', action, service]);
       if (r.exitCode != 0) err = '${r.stdout}${r.stderr}'.trim();
     } catch (e) {
       err = '$e';
@@ -464,8 +515,10 @@ class _ServicesPageState extends State<ServicesPage> {
         YaruSection(
           headline: const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
-            child: Text('System Services',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            child: Text(
+              'System Services',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
           ),
           child: Column(
             children: [
@@ -480,24 +533,46 @@ class _ServicesPageState extends State<ServicesPage> {
         YaruSection(
           headline: const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
-            child: Text('Quick Actions',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            child: Text(
+              'Quick Actions',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
           ),
           child: Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              _actionButton(context, Icons.refresh, 'Restart All',
-                  () => _runAll('restart')),
-              _actionButton(context, Icons.language, 'Open Platform',
-                  () => _open('https://$serverIp')),
-              _actionButton(context, Icons.data_object, 'phpMyAdmin',
-                  () => _open('https://127.0.0.1/phpmyadmin')),
-              _actionButton(context, Icons.shield, 'Firewall Status',
-                  _showFirewall),
+              _actionButton(
+                context,
+                Icons.refresh,
+                'Restart All',
+                () => _runAll('restart'),
+              ),
+              _actionButton(
+                context,
+                Icons.language,
+                'Open Platform',
+                () => _open('https://$serverIp'),
+              ),
+              _actionButton(
+                context,
+                Icons.data_object,
+                'phpMyAdmin',
+                () => _open('https://127.0.0.1/phpmyadmin'),
+              ),
+              _actionButton(
+                context,
+                Icons.shield,
+                'Firewall Status',
+                _showFirewall,
+              ),
               _actionButton(context, Icons.memory, 'System Info', _showSysInfo),
-              _actionButton(context, Icons.verified_user, 'SSL Certificate',
-                  _showSsl),
+              _actionButton(
+                context,
+                Icons.verified_user,
+                'SSL Certificate',
+                _showSsl,
+              ),
             ],
           ),
         ),
@@ -527,8 +602,8 @@ class _ServicesPageState extends State<ServicesPage> {
         isActive == true
             ? 'Running'
             : isActive == false
-                ? 'Stopped'
-                : 'Checking…',
+            ? 'Stopped'
+            : 'Checking…',
         style: TextStyle(color: color),
       ),
       trailing: Wrap(
@@ -547,8 +622,12 @@ class _ServicesPageState extends State<ServicesPage> {
     );
   }
 
-  Widget _actionButton(BuildContext context, IconData icon, String label,
-      VoidCallback onPressed) {
+  Widget _actionButton(
+    BuildContext context,
+    IconData icon,
+    String label,
+    VoidCallback onPressed,
+  ) {
     return FilledButton.tonalIcon(
       onPressed: onPressed,
       icon: Icon(icon, size: 18),
@@ -586,8 +665,8 @@ class _ServicesPageState extends State<ServicesPage> {
       'Firewall Status',
       out.isEmpty
           ? 'Cannot read firewall status.\n'
-              'Run the dashboard with sudo privileges '
-              '(e.g. sudo /opt/nginix-control-panel/nginix-control-panel).'
+                'Run the dashboard with sudo privileges '
+                '(e.g. sudo /opt/nginix-control-panel/nginix-control-panel).'
           : out,
     );
   }
@@ -598,7 +677,8 @@ class _ServicesPageState extends State<ServicesPage> {
     final mem = await Process.run('free', ['-h']);
     final disk = await Process.run('sh', ['-c', 'df -h / | tail -1']);
     final ip = await Process.run('hostname', ['-I']);
-    final text = 'Hostname: ${host.stdout}\n'
+    final text =
+        'Hostname: ${host.stdout}\n'
         '${os.stdout}\n'
         'Memory:\n${mem.stdout}\n'
         'Disk: ${disk.stdout}\n'
@@ -609,7 +689,7 @@ class _ServicesPageState extends State<ServicesPage> {
   Future<void> _showSsl() async {
     final r = await Process.run('sh', [
       '-c',
-      'openssl x509 -in /etc/nginx/ssl/server.crt -noout -subject -issuer -dates'
+      'openssl x509 -in /etc/nginx/ssl/server.crt -noout -subject -issuer -dates',
     ]);
     if (!mounted) return;
     final out = r.exitCode == 0
@@ -627,7 +707,10 @@ class _ServicesPageState extends State<ServicesPage> {
           width: 560,
           child: Scrollbar(
             child: SingleChildScrollView(
-              child: SelectableText(text, style: const TextStyle(fontFamily: 'monospace')),
+              child: SelectableText(
+                text,
+                style: const TextStyle(fontFamily: 'monospace'),
+              ),
             ),
           ),
         ),
@@ -727,8 +810,10 @@ class _WebsitesPageState extends State<WebsitesPage> {
 
         var root = '-';
         final content = await e.readAsString();
-        final m = RegExp(r'^\s*root\s+([^;#]+);', multiLine: true)
-            .firstMatch(content);
+        final m = RegExp(
+          r'^\s*root\s+([^;#]+);',
+          multiLine: true,
+        ).firstMatch(content);
         if (m != null) root = m.group(1)!.trim();
         sites.add(Site(name, status, root, e.path));
       }
@@ -770,9 +855,9 @@ class _WebsitesPageState extends State<WebsitesPage> {
         final status = enabledFlag is bool
             ? (enabledFlag ? 'Active' : 'Disabled')
             : (config.isNotEmpty &&
-                    enabledNames.contains(config.split('/').last))
-                ? 'Active'
-                : 'Configured';
+                  enabledNames.contains(config.split('/').last))
+            ? 'Active'
+            : 'Configured';
         sites.add(Site(name, status, root, config, url: url));
       }
       return sites;
@@ -785,7 +870,9 @@ class _WebsitesPageState extends State<WebsitesPage> {
     final raw = site.url.isNotEmpty
         ? site.url
         : 'http://$serverIp/${site.name}';
-    final url = raw.replaceAll('{serverIp}', serverIp).replaceAll('{ip}', serverIp);
+    final url = raw
+        .replaceAll('{serverIp}', serverIp)
+        .replaceAll('{ip}', serverIp);
     await Process.run('xdg-open', [url]);
   }
 
@@ -805,8 +892,10 @@ class _WebsitesPageState extends State<WebsitesPage> {
       children: [
         Row(
           children: [
-            const Text('Available Websites',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Text(
+              'Available Websites',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             const Spacer(),
             FilledButton.tonalIcon(
               onPressed: _load,
@@ -838,8 +927,9 @@ class _WebsitesPageState extends State<WebsitesPage> {
 
                 return ListTile(
                   selected: selected,
-                  selectedTileColor:
-                      Theme.of(context).colorScheme.primaryContainer,
+                  selectedTileColor: Theme.of(context)
+                      .colorScheme
+                      .primaryContainer,
                   onTap: () => setState(() => _selected = site.name),
                   leading: Icon(statusIcon, color: statusColor),
                   title: Text(site.name),
@@ -936,12 +1026,13 @@ class _DatabasesPageState extends State<DatabasesPage> {
       final out = await _sql(
         "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA;",
       );
-      final names = out
-          .split('\n')
-          .map((l) => l.trim())
-          .where((l) => l.isNotEmpty && !_systemDbs.contains(l))
-          .toList()
-        ..sort();
+      final names =
+          out
+              .split('\n')
+              .map((l) => l.trim())
+              .where((l) => l.isNotEmpty && !_systemDbs.contains(l))
+              .toList()
+            ..sort();
 
       final dbs = <DbInfo>[];
       for (final name in names) {
@@ -987,7 +1078,11 @@ class _DatabasesPageState extends State<DatabasesPage> {
       fields: const [
         _FormField('Database name', hint: 'myapp'),
         _FormField('Username', hint: 'myapp'),
-        _FormField('Password', hint: 'auto-generate if left blank', obscure: true),
+        _FormField(
+          'Password',
+          hint: 'auto-generate if left blank',
+          obscure: true,
+        ),
       ],
       submitLabel: 'Create',
     );
@@ -1032,7 +1127,11 @@ class _DatabasesPageState extends State<DatabasesPage> {
       title: 'Change Password — ${db.name}',
       fields: [
         _FormField('Username', initial: defaultUser),
-        const _FormField('New password', obscure: true, hint: 'auto-generate if blank'),
+        const _FormField(
+          'New password',
+          obscure: true,
+          hint: 'auto-generate if blank',
+        ),
       ],
       submitLabel: 'Change',
     );
@@ -1097,7 +1196,7 @@ class _DatabasesPageState extends State<DatabasesPage> {
           'This permanently drops the database and all its data.'
           '${droppable.isNotEmpty ? '\n\nUsers to drop: ${droppable.join(', ')}' : ''}'
           '${shared.isNotEmpty ? '\n\nKept (shared with other databases): '
-              '${shared.join(', ')}' : ''}',
+                    '${shared.join(', ')}' : ''}',
         ),
         actions: [
           TextButton(
@@ -1133,8 +1232,7 @@ class _DatabasesPageState extends State<DatabasesPage> {
   }
 
   static String _randomPassword() {
-    const chars =
-        'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
     final rnd = Random.secure();
     return List.generate(20, (_) => chars[rnd.nextInt(chars.length)]).join();
   }
@@ -1144,8 +1242,9 @@ class _DatabasesPageState extends State<DatabasesPage> {
     required List<_FormField> fields,
     required String submitLabel,
   }) async {
-    final controllers =
-        fields.map((f) => TextEditingController(text: f.initial)).toList();
+    final controllers = fields
+        .map((f) => TextEditingController(text: f.initial))
+        .toList();
     try {
       return await showDialog<List<String>>(
         context: context,
@@ -1202,8 +1301,10 @@ class _DatabasesPageState extends State<DatabasesPage> {
       children: [
         Row(
           children: [
-            const Text('Databases',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Text(
+              'Databases',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             const Spacer(),
             FilledButton.tonalIcon(
               onPressed: _createDatabase,
@@ -1237,8 +1338,10 @@ class _DatabasesPageState extends State<DatabasesPage> {
                 ? const Padding(
                     padding: EdgeInsets.all(32),
                     child: Center(
-                      child: Text('No databases found',
-                          style: TextStyle(color: Colors.grey)),
+                      child: Text(
+                        'No databases found',
+                        style: TextStyle(color: Colors.grey),
+                      ),
                     ),
                   )
                 : Column(
@@ -1257,12 +1360,16 @@ class _DatabasesPageState extends State<DatabasesPage> {
   Widget _dbTile(BuildContext context, DbInfo db) {
     final busy = _busy.contains(db.name);
     return ListTile(
-      leading: Icon(Icons.storage_rounded,
-          color: Theme.of(context).colorScheme.primary),
+      leading: Icon(
+        Icons.storage_rounded,
+        color: Theme.of(context).colorScheme.primary,
+      ),
       title: Text(db.name),
-      subtitle: Text(db.users.isEmpty
-          ? 'No dedicated user'
-          : 'Users: ${db.users.join(', ')}'),
+      subtitle: Text(
+        db.users.isEmpty
+            ? 'No dedicated user'
+            : 'Users: ${db.users.join(', ')}',
+      ),
       trailing: Wrap(
         spacing: 4,
         children: [
@@ -1273,10 +1380,15 @@ class _DatabasesPageState extends State<DatabasesPage> {
           ),
           TextButton.icon(
             onPressed: busy ? null : () => _deleteDatabase(db),
-            icon: Icon(Icons.delete_outline,
-                size: 18, color: Theme.of(context).colorScheme.error),
-            label: Text('Delete',
-                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            icon: Icon(
+              Icons.delete_outline,
+              size: 18,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            label: Text(
+              'Delete',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
           ),
         ],
       ),
@@ -1289,8 +1401,7 @@ class _FormField {
   final String? hint;
   final String? initial;
   final bool obscure;
-  const _FormField(this.label,
-      {this.hint, this.initial, this.obscure = false});
+  const _FormField(this.label, {this.hint, this.initial, this.obscure = false});
 }
 
 /* ================================================================
@@ -1318,6 +1429,7 @@ class _BackupsPageState extends State<BackupsPage> {
   List<File> _files = [];
   String _schedule = '';
   bool _running = false;
+  final Set<String> _exporting = {};
 
   @override
   void initState() {
@@ -1340,12 +1452,13 @@ class _BackupsPageState extends State<BackupsPage> {
         _snack('Could not list databases: ${err.trim()}');
         return;
       }
-      final dbs = out
-          .split('\n')
-          .map((l) => l.trim())
-          .where((l) => l.isNotEmpty && !_systemDbs.contains(l))
-          .toList()
-        ..sort();
+      final dbs =
+          out
+              .split('\n')
+              .map((l) => l.trim())
+              .where((l) => l.isNotEmpty && !_systemDbs.contains(l))
+              .toList()
+            ..sort();
       if (mounted) setState(() => _databases = dbs);
     } catch (e) {
       _snack('Could not list databases: $e');
@@ -1363,7 +1476,9 @@ class _BackupsPageState extends State<BackupsPage> {
         .where((e) => e.path.endsWith('.enc'))
         .cast<File>()
         .toList();
-    files.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+    files.sort(
+      (a, b) => b.statSync().modified.compareTo(a.statSync().modified),
+    );
 
     var schedule = '';
     try {
@@ -1411,6 +1526,104 @@ class _BackupsPageState extends State<BackupsPage> {
     if (mounted) setState(() => _running = false);
   }
 
+  /// Suggested `.sql` destination next to the user's Downloads folder.
+  String _suggestedExportPath(String encPath) {
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    final downloads = Directory('$home/Downloads');
+    final dir = downloads.existsSync() ? downloads.path : home;
+    final base = encPath.split('/').last.replaceFirst(RegExp(r'\.enc$'), '');
+    return '$dir/$base';
+  }
+
+  Future<String?> _promptExportPath(String suggested) async {
+    final controller = TextEditingController(text: suggested);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Export SQL'),
+        content: SizedBox(
+          width: 520,
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Save SQL file as',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Export'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return (result == null || result.isEmpty) ? null : result;
+  }
+
+  Future<String?> _pickSavePath(String suggested) async {
+    try {
+      final r = await Process.run('zenity', [
+        '--file-selection',
+        '--save',
+        '--confirm-overwrite',
+        '--title=Export SQL backup',
+        '--filename=$suggested',
+      ]);
+      if (r.exitCode != 0) return null;
+      final p = r.stdout.toString().trim();
+      return p.isEmpty ? null : p;
+    } catch (_) {
+      return _promptExportPath(suggested);
+    }
+  }
+
+  /// Decrypt a `.sql.enc` backup with the AES key and write a plain `.sql` file.
+  Future<void> _exportSql(File f) async {
+    final path = f.path;
+    final out = await _pickSavePath(_suggestedExportPath(path));
+    if (out == null || !mounted) return;
+
+    setState(() => _exporting.add(path));
+    try {
+      final r = await Process.run('sudo', [
+        '-n',
+        'openssl',
+        'enc',
+        '-d',
+        '-aes-256-cbc',
+        '-pbkdf2',
+        '-pass',
+        'file:/etc/mariadb-backup.key',
+        '-in',
+        path,
+        '-out',
+        out,
+      ]);
+      if (r.exitCode != 0) {
+        final err = r.stderr.toString().trim();
+        _snack('Export failed${err.isEmpty ? '' : ': $err'}');
+        return;
+      }
+      // openssl runs as root; hand the exported file to the desktop user.
+      final uid = (await Process.run('id', ['-u'])).stdout.toString().trim();
+      final gid = (await Process.run('id', ['-g'])).stdout.toString().trim();
+      await Process.run('sudo', ['-n', 'chown', '$uid:$gid', out]);
+      _snack('SQL exported: ${out.split('/').last}');
+    } catch (e) {
+      _snack('Export failed: $e');
+    } finally {
+      if (mounted) setState(() => _exporting.remove(path));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListView(
@@ -1418,14 +1631,17 @@ class _BackupsPageState extends State<BackupsPage> {
       children: [
         Row(
           children: [
-            const Text('Database Backups',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Text(
+              'Database Backups',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             const Spacer(),
             SizedBox(
               width: 240,
               child: DropdownButtonFormField<String>(
-                initialValue:
-                    _databases.contains(_selected) ? _selected : _allLabel,
+                initialValue: _databases.contains(_selected)
+                    ? _selected
+                    : _allLabel,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Database',
@@ -1447,11 +1663,13 @@ class _BackupsPageState extends State<BackupsPage> {
             ),
             const SizedBox(width: 12),
             _running
-                ? const Row(children: [
-                    YaruCircularProgressIndicator(strokeWidth: 2.5),
-                    SizedBox(width: 12),
-                    Text('Backing up…'),
-                  ])
+                ? const Row(
+                    children: [
+                      YaruCircularProgressIndicator(strokeWidth: 2.5),
+                      SizedBox(width: 12),
+                      Text('Backing up…'),
+                    ],
+                  )
                 : FilledButton.icon(
                     onPressed: _backupNow,
                     icon: const Icon(Icons.backup, size: 18),
@@ -1469,7 +1687,8 @@ class _BackupsPageState extends State<BackupsPage> {
         const SizedBox(height: 6),
         Text(
           'Encrypted AES-256-CBC • Retention 30 days'
-          '${_schedule.isEmpty ? '' : ' • Schedule: $_schedule'}',
+          '${_schedule.isEmpty ? '' : ' • Schedule: $_schedule'}'
+          ' • Download icon exports a decrypted .sql file',
           style: const TextStyle(color: Colors.grey),
         ),
         const SizedBox(height: 12),
@@ -1478,8 +1697,11 @@ class _BackupsPageState extends State<BackupsPage> {
               ? const Padding(
                   padding: EdgeInsets.all(32),
                   child: Center(
-                      child: Text('No backups found',
-                          style: TextStyle(color: Colors.grey))),
+                    child: Text(
+                      'No backups found',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  ),
                 )
               : Column(
                   children: [
@@ -1508,8 +1730,8 @@ class _BackupsPageState extends State<BackupsPage> {
     final m = RegExp(
       r'^db-(.+?)-(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})\.sql\.enc$',
     ).firstMatch(name);
-    final legacy =
-        RegExp(r'^db-(.+?)-(\d{8}-\d{6})\.sql\.enc$').firstMatch(name);
+    final legacy = RegExp(r'^db-(.+?)-(\d{8}-\d{6})\.sql\.enc$')
+        .firstMatch(name);
     if (m != null) {
       label = m.group(1)!;
       when = m.group(2)!.replaceFirst('_', ' ');
@@ -1524,10 +1746,30 @@ class _BackupsPageState extends State<BackupsPage> {
       subtitle: Text(
         '${label.isEmpty ? '' : 'Database: $label  •  '}$size  •  ${when.isEmpty ? date : when}',
       ),
-      trailing: IconButton(
-        tooltip: 'Open Backup Folder',
-        onPressed: () => Process.run('xdg-open', ['/var/backups/mariadb']),
-        icon: const Icon(Icons.folder_open),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_exporting.contains(f.path))
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: YaruCircularProgressIndicator(strokeWidth: 2.5),
+              ),
+            )
+          else
+            IconButton(
+              tooltip: 'Decrypt & export .sql',
+              onPressed: () => _exportSql(f),
+              icon: const Icon(Icons.download),
+            ),
+          IconButton(
+            tooltip: 'Open Backup Folder',
+            onPressed: () => Process.run('xdg-open', ['/var/backups/mariadb']),
+            icon: const Icon(Icons.folder_open),
+          ),
+        ],
       ),
     );
   }
@@ -1568,7 +1810,9 @@ class _RestorePageState extends State<RestorePage> {
         if (e is File && e.path.endsWith('.sql.enc')) files.add(e);
       }
     }
-    files.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+    files.sort(
+      (a, b) => b.statSync().modified.compareTo(a.statSync().modified),
+    );
     if (mounted) {
       setState(() {
         _files = files;
@@ -1586,11 +1830,11 @@ class _RestorePageState extends State<RestorePage> {
   }
 
   String _dbLabel(String name) {
-    final m = RegExp(r'^db-(.+?)-(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})\.sql\.enc$')
-        .firstMatch(name);
+    final m = RegExp(
+      r'^db-(.+?)-(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})\.sql\.enc$',
+    ).firstMatch(name);
     if (m != null) return m.group(1)!;
-    final legacy =
-        RegExp(r'^db-(.+?)-\d{8}-\d{6}\.sql\.enc$').firstMatch(name);
+    final legacy = RegExp(r'^db-(.+?)-\d{8}-\d{6}\.sql\.enc$').firstMatch(name);
     return legacy?.group(1) ?? 'unknown';
   }
 
@@ -1669,8 +1913,10 @@ class _RestorePageState extends State<RestorePage> {
       children: [
         Row(
           children: [
-            const Text('Restore from Backup',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Text(
+              'Restore from Backup',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             const Spacer(),
             IconButton(
               tooltip: 'Refresh backups',
@@ -1703,8 +1949,11 @@ class _RestorePageState extends State<RestorePage> {
             child: const Padding(
               padding: EdgeInsets.all(32),
               child: Center(
-                  child: Text('No backups available',
-                      style: TextStyle(color: Colors.grey))),
+                child: Text(
+                  'No backups available',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
             ),
           )
         else ...[
@@ -1737,18 +1986,19 @@ class _RestorePageState extends State<RestorePage> {
                 style: FilledButton.styleFrom(
                   backgroundColor: Theme.of(context).colorScheme.error,
                 ),
-                onPressed:
-                    _selected == null || _restoring ? null : _restore,
+                onPressed: _selected == null || _restoring ? null : _restore,
                 icon: const Icon(Icons.settings_backup_restore, size: 18),
                 label: const Text('RESTORE'),
               ),
               const SizedBox(width: 12),
               if (_restoring)
-                const Row(children: [
-                  YaruCircularProgressIndicator(strokeWidth: 2.5),
-                  SizedBox(width: 12),
-                  Text('Restoring…'),
-                ]),
+                const Row(
+                  children: [
+                    YaruCircularProgressIndicator(strokeWidth: 2.5),
+                    SizedBox(width: 12),
+                    Text('Restoring…'),
+                  ],
+                ),
             ],
           ),
         ],
@@ -1838,8 +2088,9 @@ class _ConfigsPageState extends State<ConfigsPage> {
     final gate = _gate;
     if (gate == null) return;
     final raw = gate.url.isNotEmpty ? gate.url : 'https://$serverIp/phpmyadmin';
-    final url =
-        raw.replaceAll('{serverIp}', serverIp).replaceAll('{ip}', serverIp);
+    final url = raw
+        .replaceAll('{serverIp}', serverIp)
+        .replaceAll('{ip}', serverIp);
     await Process.run('xdg-open', [url]);
   }
 
@@ -1859,8 +2110,7 @@ class _ConfigsPageState extends State<ConfigsPage> {
 
   String _randomPassword() {
     final rnd = Random.secure();
-    const chars =
-        'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
     return List.generate(18, (_) => chars[rnd.nextInt(chars.length)]).join();
   }
 
@@ -1893,7 +2143,8 @@ class _ConfigsPageState extends State<ConfigsPage> {
                       IconButton(
                         tooltip: 'Generate',
                         onPressed: () => setDialogState(
-                            () => controller.text = _randomPassword()),
+                          () => controller.text = _randomPassword(),
+                        ),
                         icon: const Icon(Icons.casino),
                       ),
                       IconButton(
@@ -1901,7 +2152,8 @@ class _ConfigsPageState extends State<ConfigsPage> {
                         onPressed: () =>
                             setDialogState(() => obscure = !obscure),
                         icon: Icon(
-                            obscure ? Icons.visibility : Icons.visibility_off),
+                          obscure ? Icons.visibility : Icons.visibility_off,
+                        ),
                       ),
                     ],
                   ),
@@ -1912,8 +2164,9 @@ class _ConfigsPageState extends State<ConfigsPage> {
                 'Updates the nginx login (.nginix-htpasswd) and '
                 'phpmyadmin-gate.json.',
                 style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+                  fontSize: 12,
+                  color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),
@@ -1940,41 +2193,53 @@ class _ConfigsPageState extends State<ConfigsPage> {
     if (gate == null) return;
     final stamp = DateTime.now().microsecondsSinceEpoch;
 
-    final hashRes =
-        await Process.run('openssl', ['passwd', '-apr1', newPassword]);
+    final hashRes = await Process.run('openssl', [
+      'passwd',
+      '-apr1',
+      newPassword,
+    ]);
     if (hashRes.exitCode != 0) {
       _snack('Failed to hash password');
       return;
     }
     final hash = hashRes.stdout.toString().trim();
 
-    final tmpHt =
-        File('${Directory.systemTemp.path}/nginix_htpasswd_$stamp.tmp');
-    final tmpJson =
-        File('${Directory.systemTemp.path}/nginix_gate_$stamp.json');
+    final tmpHt = File(
+      '${Directory.systemTemp.path}/nginix_htpasswd_$stamp.tmp',
+    );
+    final tmpJson = File(
+      '${Directory.systemTemp.path}/nginix_gate_$stamp.json',
+    );
 
     var ok = true;
     try {
       await tmpHt.writeAsString('${gate.user}:$hash\n');
       await tmpJson.writeAsString(
-          '${const JsonEncoder.withIndent('  ').convert({
-            'name': gate.name,
-            'url': gate.url,
-            'realm': gate.realm,
-            'user': gate.user,
-            'password': newPassword,
-          })}\n');
+        '${const JsonEncoder.withIndent('  ').convert({'name': gate.name, 'url': gate.url, 'realm': gate.realm, 'user': gate.user, 'password': newPassword})}\n',
+      );
 
-      final cp1 = await Process.run('sudo', ['-n', 'cp', tmpHt.path, _htpasswdPath]);
-      final cp2 = await Process
-          .run('sudo', ['-n', 'cp', tmpJson.path, _gateJsonPath]);
+      final cp1 = await Process.run('sudo', [
+        '-n',
+        'cp',
+        tmpHt.path,
+        _htpasswdPath,
+      ]);
+      final cp2 = await Process.run('sudo', [
+        '-n',
+        'cp',
+        tmpJson.path,
+        _gateJsonPath,
+      ]);
       if (cp1.exitCode != 0 || cp2.exitCode != 0) {
         ok = false;
       } else {
-        await Process.run(
-            'sudo', ['-n', 'chmod', '640', _htpasswdPath]);
-        await Process.run(
-            'sudo', ['-n', 'chown', 'root:www-data', _htpasswdPath]);
+        await Process.run('sudo', ['-n', 'chmod', '640', _htpasswdPath]);
+        await Process.run('sudo', [
+          '-n',
+          'chown',
+          'root:www-data',
+          _htpasswdPath,
+        ]);
         await Process.run('sudo', ['-n', 'chmod', '600', _gateJsonPath]);
         await Process.run('sudo', ['-n', 'chown', 'root:root', _gateJsonPath]);
       }
@@ -1994,13 +2259,15 @@ class _ConfigsPageState extends State<ConfigsPage> {
       return;
     }
     if (mounted) {
-      setState(() => _gate = GateCreds(
-            name: gate.name,
-            url: gate.url,
-            realm: gate.realm,
-            user: gate.user,
-            password: newPassword,
-          ));
+      setState(
+        () => _gate = GateCreds(
+          name: gate.name,
+          url: gate.url,
+          realm: gate.realm,
+          user: gate.user,
+          password: newPassword,
+        ),
+      );
     }
     _snack('Gate password updated');
   }
@@ -2032,8 +2299,7 @@ class _ConfigsPageState extends State<ConfigsPage> {
       setState(() {
         _content = content;
         _editor.text = content;
-        _editor.selection =
-            TextSelection.collapsed(offset: content.length);
+        _editor.selection = TextSelection.collapsed(offset: content.length);
         _loading = false;
       });
     }
@@ -2054,8 +2320,10 @@ class _ConfigsPageState extends State<ConfigsPage> {
 
   Future<void> _save() async {
     final path = configFiles[_selected]!;
-    final tmpFile = File('${Directory.systemTemp.path}/config_write_'
-        '${DateTime.now().microsecondsSinceEpoch}.tmp');
+    final tmpFile = File(
+      '${Directory.systemTemp.path}/config_write_'
+      '${DateTime.now().microsecondsSinceEpoch}.tmp',
+    );
     try {
       await tmpFile.writeAsString(_content);
       final r = await Process.run('sudo', ['-n', 'cp', tmpFile.path, path]);
@@ -2116,7 +2384,9 @@ class _ConfigsPageState extends State<ConfigsPage> {
   Widget _buildGateCard() {
     final gate = _gate!;
     final scheme = Theme.of(context).colorScheme;
-    final url = gate.url.isNotEmpty ? gate.url : 'https://{serverIp}/phpmyadmin';
+    final url = gate.url.isNotEmpty
+        ? gate.url
+        : 'https://{serverIp}/phpmyadmin';
     return YaruBorderContainer(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -2127,9 +2397,13 @@ class _ConfigsPageState extends State<ConfigsPage> {
               children: [
                 Icon(Icons.lock_outline, size: 20, color: scheme.primary),
                 const SizedBox(width: 8),
-                Text('${gate.name} Gate Login',
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(
+                  '${gate.name} Gate Login',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const Spacer(),
                 IconButton(
                   tooltip: 'Open gate folder',
@@ -2162,8 +2436,10 @@ class _ConfigsPageState extends State<ConfigsPage> {
               children: [
                 SizedBox(
                   width: 90,
-                  child: Text('Password',
-                      style: TextStyle(color: scheme.onSurfaceVariant)),
+                  child: Text(
+                    'Password',
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
                 ),
                 Expanded(
                   child: Text(
@@ -2173,11 +2449,11 @@ class _ConfigsPageState extends State<ConfigsPage> {
                 ),
                 IconButton(
                   tooltip: _showGatePassword ? 'Hide' : 'Show',
-                  onPressed: () => setState(
-                      () => _showGatePassword = !_showGatePassword),
-                  icon: Icon(_showGatePassword
-                      ? Icons.visibility_off
-                      : Icons.visibility),
+                  onPressed: () =>
+                      setState(() => _showGatePassword = !_showGatePassword),
+                  icon: Icon(
+                    _showGatePassword ? Icons.visibility_off : Icons.visibility,
+                  ),
                 ),
                 IconButton(
                   tooltip: 'Copy username & password',
@@ -2203,12 +2479,12 @@ class _ConfigsPageState extends State<ConfigsPage> {
             child: Text(
               label,
               style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
           Expanded(
-            child:
-                Text(value, style: const TextStyle(fontFamily: 'monospace')),
+            child: Text(value, style: const TextStyle(fontFamily: 'monospace')),
           ),
           IconButton(
             tooltip: 'Copy $label',
@@ -2229,8 +2505,10 @@ class _ConfigsPageState extends State<ConfigsPage> {
         children: [
           Row(
             children: [
-              const Text('Config Editor',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const Text(
+                'Config Editor',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
               const Spacer(),
               IconButton(
                 tooltip: 'Open nginx config folder',
@@ -2249,8 +2527,8 @@ class _ConfigsPageState extends State<ConfigsPage> {
             _selected == null
                 ? ''
                 : (_selected == _gateTab
-                    ? _gateJsonPath
-                    : configFiles[_selected] ?? ''),
+                      ? _gateJsonPath
+                      : configFiles[_selected] ?? ''),
             style: const TextStyle(
               fontFamily: 'monospace',
               fontSize: 12,
@@ -2273,25 +2551,29 @@ class _ConfigsPageState extends State<ConfigsPage> {
           Expanded(
             child: _selected == _gateTab
                 ? (_gate == null
-                    ? const Center(
-                        child: Text('No phpmyadmin-gate.json found.'))
-                    : SingleChildScrollView(child: _buildGateCard()))
+                      ? const Center(
+                          child: Text('No phpmyadmin-gate.json found.'),
+                        )
+                      : SingleChildScrollView(child: _buildGateCard()))
                 : _loading
-                    ? const Center(child: YaruCircularProgressIndicator())
-                    : YaruBorderContainer(
-                        child: Scrollbar(
-                          child: TextField(
-                            controller: _editor,
-                            onChanged: (v) => _content = v,
-                            maxLines: null,
-                            expands: true,
-                            style: const TextStyle(
-                                fontFamily: 'monospace', fontSize: 13),
-                            decoration: const InputDecoration(
-                                border: InputBorder.none),
-                          ),
+                ? const Center(child: YaruCircularProgressIndicator())
+                : YaruBorderContainer(
+                    child: Scrollbar(
+                      child: TextField(
+                        controller: _editor,
+                        onChanged: (v) => _content = v,
+                        maxLines: null,
+                        expands: true,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 13,
+                        ),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
                         ),
                       ),
+                    ),
+                  ),
           ),
           if (_selected != _gateTab) ...[
             const SizedBox(height: 12),
@@ -2346,7 +2628,8 @@ class _TerminalPageState extends State<TerminalPage> {
     'Nginx Error Log': 'tail -50 /var/log/nginx/demoweb.local-error.log',
     'Backup Log': 'tail -50 /var/log/backup-db.log',
     'MySQL Status': 'systemctl status mariadb',
-    'SSL Cert': 'openssl x509 -in /etc/nginx/ssl/server.crt -noout -text | head -15',
+    'SSL Cert':
+        'openssl x509 -in /etc/nginx/ssl/server.crt -noout -text | head -15',
     'Firewall': 'ufw status verbose',
     'Cron Jobs': 'crontab -l',
   };
@@ -2357,8 +2640,7 @@ class _TerminalPageState extends State<TerminalPage> {
     final out = '${r.stdout}\n${r.stderr}';
     if (mounted) {
       setState(() => _log.add(out.isEmpty ? '(no output)' : out));
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => _scrollToEnd());
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
     }
   }
 
@@ -2440,8 +2722,14 @@ class NetworkInfo {
   final List<String> dns;
   final String status;
   final String ping;
-  NetworkInfo(this.ip, this.netmask, this.gateway, this.dns, this.status,
-      this.ping);
+  NetworkInfo(
+    this.ip,
+    this.netmask,
+    this.gateway,
+    this.dns,
+    this.status,
+    this.ping,
+  );
 }
 
 class NetworkPage extends StatefulWidget {
@@ -2482,11 +2770,17 @@ class _NetworkPageState extends State<NetworkPage> {
       final tethered = {'rndis_host', 'usbnet', 'cdc_ether', 'cdc_ncm'};
       for (final line in (devs.stdout as String? ?? '').split('\n')) {
         final parts = line.split(':');
-        if (parts.length >= 3 && parts[1] == 'ethernet' &&
+        if (parts.length >= 3 &&
+            parts[1] == 'ethernet' &&
             parts[2] == 'connected') {
           final d = parts[0];
-          final drv = await Process.run('nmcli',
-              ['-g', 'GENERAL.DRIVER', 'device', 'show', d]);
+          final drv = await Process.run('nmcli', [
+            '-g',
+            'GENERAL.DRIVER',
+            'device',
+            'show',
+            d,
+          ]);
           final driver = drv.stdout.toString().trim();
           if (!tethered.contains(driver)) {
             device = d;
@@ -2505,8 +2799,14 @@ class _NetworkPageState extends State<NetworkPage> {
     }
 
     if (device.isNotEmpty) {
-      final addr =
-          await Process.run('ip', ['-o', '-4', 'addr', 'show', 'dev', device]);
+      final addr = await Process.run('ip', [
+        '-o',
+        '-4',
+        'addr',
+        'show',
+        'dev',
+        device,
+      ]);
       if (addr.exitCode == 0) {
         final m = RegExp(r'inet\s+(\d+\.\d+\.\d+\.\d+)/(\d+)')
             .firstMatch(addr.stdout.toString());
@@ -2516,8 +2816,13 @@ class _NetworkPageState extends State<NetworkPage> {
         }
       }
 
-      final gw =
-          await Process.run('nmcli', ['-g', 'IP4.GATEWAY', 'device', 'show', device]);
+      final gw = await Process.run('nmcli', [
+        '-g',
+        'IP4.GATEWAY',
+        'device',
+        'show',
+        device,
+      ]);
       if (gw.exitCode == 0 && gw.stdout.toString().trim().isNotEmpty) {
         gateway = gw.stdout.toString().trim();
       }
@@ -2541,8 +2846,7 @@ class _NetworkPageState extends State<NetworkPage> {
     final conn = await Process.run('nmcli', ['-t', 'networking']);
     if (conn.exitCode == 0 &&
         conn.stdout.toString().trim().toLowerCase() == 'enabled') {
-      final up =
-          await Process.run('nmcli', ['-t', '-f', 'RUNNING', 'general']);
+      final up = await Process.run('nmcli', ['-t', '-f', 'RUNNING', 'general']);
       status = up.stdout.toString().trim().toLowerCase() == 'running'
           ? 'Connected'
           : (ip.isNotEmpty ? 'Connected' : 'Offline');
@@ -2565,19 +2869,21 @@ class _NetworkPageState extends State<NetworkPage> {
       }
     }
 
-    final pingResult = await Process.run(
-      'ping',
-      ['-c', '4', '-W', '2', 'google.com'],
-      runInShell: true,
-    );
+    final pingResult = await Process.run('ping', [
+      '-c',
+      '4',
+      '-W',
+      '2',
+      'google.com',
+    ], runInShell: true);
     if (pingResult.exitCode == 0) {
       final out = pingResult.stdout.toString();
       final stats = RegExp(r'= ([^=]+) =').firstMatch(out);
-      final loss =
-          RegExp(r'(\d+(?:\.\d+)?)% packet loss').firstMatch(out);
+      final loss = RegExp(r'(\d+(?:\.\d+)?)% packet loss').firstMatch(out);
       final lossText = loss?.group(1) ?? '0';
       final timeText = stats?.group(1)?.trim() ?? '';
-      ping = 'Online · $lossText% loss${timeText.isNotEmpty ? ' · $timeText' : ''}';
+      ping =
+          'Online · $lossText% loss${timeText.isNotEmpty ? ' · $timeText' : ''}';
     } else if (status == 'Connected') {
       ping = 'Google unreachable';
     } else {
@@ -2592,8 +2898,12 @@ class _NetworkPageState extends State<NetworkPage> {
     }
   }
 
-  Widget _row(BuildContext context, String label, String value,
-      [Color? valueColor]) {
+  Widget _row(
+    BuildContext context,
+    String label,
+    String value, [
+    Color? valueColor,
+  ]) {
     final missing = value.isEmpty;
     final colorScheme = Theme.of(context).colorScheme;
     return ListTile(
@@ -2604,7 +2914,8 @@ class _NetworkPageState extends State<NetworkPage> {
         style: TextStyle(
           fontFamily: 'monospace',
           fontSize: 13,
-          color: valueColor ??
+          color:
+              valueColor ??
               (missing
                   ? colorScheme.error
                   : Theme.of(context).colorScheme.onSurface),
@@ -2622,20 +2933,29 @@ class _NetworkPageState extends State<NetworkPage> {
         YaruSection(
           headline: const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
-            child: Text('Network Information',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            child: Text(
+              'Network Information',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
           ),
           child: Column(
             children: [
-              _row(context, 'Connection Status',
-                  info == null ? '' : info.status,
-                  info == null
-                      ? null
-                      : info.status == 'Connected'
-                          ? Colors.green.shade600
-                          : Theme.of(context).colorScheme.error),
+              _row(
+                context,
+                'Connection Status',
+                info == null ? '' : info.status,
+                info == null
+                    ? null
+                    : info.status == 'Connected'
+                    ? Colors.green.shade600
+                    : Theme.of(context).colorScheme.error,
+              ),
               const Divider(height: 1),
-              _row(context, 'Ping Test (Google)', info == null ? '' : info.ping),
+              _row(
+                context,
+                'Ping Test (Google)',
+                info == null ? '' : info.ping,
+              ),
               const Divider(height: 1),
               _row(context, 'IP Address', info?.ip ?? ''),
               const Divider(height: 1),
@@ -2643,11 +2963,17 @@ class _NetworkPageState extends State<NetworkPage> {
               const Divider(height: 1),
               _row(context, 'Gateway', info?.gateway ?? ''),
               const Divider(height: 1),
-              _row(context, 'Primary DNS',
-                  info == null || info.dns.isEmpty ? '' : info.dns[0]),
+              _row(
+                context,
+                'Primary DNS',
+                info == null || info.dns.isEmpty ? '' : info.dns[0],
+              ),
               const Divider(height: 1),
-              _row(context, 'Secondary DNS',
-                  info == null || info.dns.length < 2 ? '' : info.dns[1]),
+              _row(
+                context,
+                'Secondary DNS',
+                info == null || info.dns.length < 2 ? '' : info.dns[1],
+              ),
             ],
           ),
         ),
@@ -2655,7 +2981,10 @@ class _NetworkPageState extends State<NetworkPage> {
         Center(
           child: OutlinedButton.icon(
             onPressed: _loading ? null : _load,
-            icon: Icon(_loading ? Icons.hourglass_top : Icons.refresh, size: 18),
+            icon: Icon(
+              _loading ? Icons.hourglass_top : Icons.refresh,
+              size: 18,
+            ),
             label: const Text('Refresh'),
           ),
         ),
@@ -2774,8 +3103,7 @@ class _FirewallPageState extends State<FirewallPage> {
     }
     if (out.toLowerCase().contains('status: active')) active = true;
 
-    final lineRe =
-        RegExp(r'^(.+?)\s{2,}(ALLOW|DENY|LIMIT|REJECT)\s+(.+)$');
+    final lineRe = RegExp(r'^(.+?)\s{2,}(ALLOW|DENY|LIMIT|REJECT)\s+(.+)$');
     for (var line in out.split('\n')) {
       line = line.trimRight();
       if (line.trim().isEmpty ||
@@ -2859,8 +3187,13 @@ class _FirewallPageState extends State<FirewallPage> {
     setState(() => _busy = true);
     final errors = <String>[];
     for (final spec in specs) {
-      final r =
-          await Process.run('sudo', ['-n', 'ufw', 'delete', 'allow', spec]);
+      final r = await Process.run('sudo', [
+        '-n',
+        'ufw',
+        'delete',
+        'allow',
+        spec,
+      ]);
       if (r.exitCode != 0) {
         errors.add('${r.stdout}${r.stderr}'.trim());
       }
@@ -2881,8 +3214,10 @@ class _FirewallPageState extends State<FirewallPage> {
     final ng = await Process.run('sudo', ['-n', 'ufw', 'allow', 'Nginx Full']);
     if (ng.exitCode != 0) {
       final err = '${ng.stdout}${ng.stderr}'.trim();
-      _snack('Could not allow Nginx Full'
-          '${err.isEmpty ? '' : ': $err'} — firewall not enabled');
+      _snack(
+        'Could not allow Nginx Full'
+        '${err.isEmpty ? '' : ': $err'} — firewall not enabled',
+      );
       await _load();
       if (mounted) setState(() => _busy = false);
       return;
@@ -3023,22 +3358,29 @@ class _FirewallPageState extends State<FirewallPage> {
         value == null
             ? Icons.help_outline
             : value
-                ? Icons.check_circle_outline
-                : Icons.cancel_outlined,
+            ? Icons.check_circle_outline
+            : Icons.cancel_outlined,
         color: color,
       ),
       title: Text(label),
-      trailing: Text(text,
-          style: TextStyle(
-              color: color, fontWeight: FontWeight.w600, fontSize: 13)),
+      trailing: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w600,
+          fontSize: 13,
+        ),
+      ),
     );
   }
 
   Widget _toggleTile(int port, String label) {
     final open = _status?.openTcp.contains(port) ?? false;
     return ListTile(
-      leading: Icon(open ? Icons.lock_open : Icons.lock,
-          color: open ? Colors.green.shade600 : Colors.grey),
+      leading: Icon(
+        open ? Icons.lock_open : Icons.lock,
+        color: open ? Colors.green.shade600 : Colors.grey,
+      ),
       title: Text('$label  ($port/tcp)'),
       subtitle: Text(open ? 'Open — accepting connections' : 'Closed'),
       trailing: Switch(
@@ -3061,8 +3403,10 @@ class _FirewallPageState extends State<FirewallPage> {
       children: [
         Row(
           children: [
-            const Text('Firewall',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Text(
+              'Firewall',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(width: 12),
             if (!_loading)
               Chip(
@@ -3071,11 +3415,13 @@ class _FirewallPageState extends State<FirewallPage> {
                   size: 18,
                   color: active ? Colors.green.shade700 : errorColor,
                 ),
-                label: Text(_error != null
-                    ? 'Unknown'
-                    : active
-                        ? 'Active'
-                        : 'Inactive'),
+                label: Text(
+                  _error != null
+                      ? 'Unknown'
+                      : active
+                      ? 'Active'
+                      : 'Inactive',
+                ),
               ),
             const Spacer(),
             if (_busy || _loading)
@@ -3089,8 +3435,10 @@ class _FirewallPageState extends State<FirewallPage> {
           ],
         ),
         const SizedBox(height: 6),
-        const Text('Manage the UFW firewall (ports 80/443 and custom rules).',
-            style: TextStyle(color: Colors.grey)),
+        const Text(
+          'Manage the UFW firewall (ports 80/443 and custom rules).',
+          style: TextStyle(color: Colors.grey),
+        ),
         const SizedBox(height: 12),
         if (!_loading && _error != null)
           YaruBorderContainer(
@@ -3111,8 +3459,9 @@ class _FirewallPageState extends State<FirewallPage> {
               leading: Icon(Icons.warning_amber, color: errorColor),
               title: const Text('Firewall is inactive'),
               subtitle: const Text(
-                  'Rules have no effect until UFW is enabled. Enabling allows '
-                  'SSH, HTTP and HTTPS first so you are not locked out.'),
+                'Rules have no effect until UFW is enabled. Enabling allows '
+                'SSH, HTTP and HTTPS first so you are not locked out.',
+              ),
               trailing: FilledButton(
                 onPressed: _busy ? null : _enableFirewall,
                 child: const Text('ENABLE'),
@@ -3130,8 +3479,10 @@ class _FirewallPageState extends State<FirewallPage> {
           ),
         ),
         const SizedBox(height: 16),
-        const Text('Custom Port',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const Text(
+          'Custom Port',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 8),
         Row(
           children: [
@@ -3185,8 +3536,10 @@ class _FirewallPageState extends State<FirewallPage> {
           ],
         ),
         const SizedBox(height: 20),
-        const Text('Port Status Checker',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const Text(
+          'Port Status Checker',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 8),
         Row(
           children: [
@@ -3234,36 +3587,51 @@ class _FirewallPageState extends State<FirewallPage> {
                 ? const Padding(
                     padding: EdgeInsets.all(20),
                     child: Center(
-                        child: YaruCircularProgressIndicator(
-                            strokeWidth: 2.5)),
+                      child: YaruCircularProgressIndicator(strokeWidth: 2.5),
+                    ),
                   )
                 : Column(
                     children: [
                       ListTile(
                         dense: true,
-                        title: Text('Check: $_chkHost:$_chkPort/tcp',
-                            style:
-                                const TextStyle(fontFamily: 'monospace')),
+                        title: Text(
+                          'Check: $_chkHost:$_chkPort/tcp',
+                          style: const TextStyle(fontFamily: 'monospace'),
+                        ),
                         subtitle: const Text(
-                            'TCP connect uses a 3 second timeout'),
+                          'TCP connect uses a 3 second timeout',
+                        ),
                       ),
                       const Divider(height: 1),
-                      _chkRow('Listening on this server', _chkListening,
-                          'Something is listening', 'Nothing is listening'),
+                      _chkRow(
+                        'Listening on this server',
+                        _chkListening,
+                        'Something is listening',
+                        'Nothing is listening',
+                      ),
                       const Divider(height: 1),
-                      _chkRow('UFW firewall allows it', _chkFw,
-                          'Allowed by UFW', 'Blocked / UFW inactive'),
+                      _chkRow(
+                        'UFW firewall allows it',
+                        _chkFw,
+                        'Allowed by UFW',
+                        'Blocked / UFW inactive',
+                      ),
                       const Divider(height: 1),
-                      _chkRow('Connection to $_chkHost', _chkReach,
-                          'Connection succeeded',
-                          'Refused or timed out'),
+                      _chkRow(
+                        'Connection to $_chkHost',
+                        _chkReach,
+                        'Connection succeeded',
+                        'Refused or timed out',
+                      ),
                     ],
                   ),
           ),
         ],
         const SizedBox(height: 20),
-        const Text('Active Rules',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const Text(
+          'Active Rules',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 8),
         YaruBorderContainer(
           child: _loading
@@ -3272,36 +3640,41 @@ class _FirewallPageState extends State<FirewallPage> {
                   child: Center(child: YaruCircularProgressIndicator()),
                 )
               : (st == null || st.rules.isEmpty)
-                  ? const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(
-                          child: Text('No rules',
-                              style: TextStyle(color: Colors.grey))),
-                    )
-                  : Column(
-                      children: [
-                        for (final (i, rule) in st.rules.indexed) ...[
-                          if (i > 0) const Divider(height: 1),
-                          ListTile(
-                            dense: true,
-                            leading: Icon(
-                              rule.action == 'ALLOW'
-                                  ? Icons.check_circle_outline
-                                  : Icons.block,
-                              color: rule.action == 'ALLOW'
-                                  ? Colors.green.shade600
-                                  : errorColor,
-                            ),
-                            title: Text(rule.spec,
-                                style:
-                                    const TextStyle(fontFamily: 'monospace')),
-                            trailing: Text(rule.action,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold)),
-                          ),
-                        ],
-                      ],
+              ? const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(
+                    child: Text(
+                      'No rules',
+                      style: TextStyle(color: Colors.grey),
                     ),
+                  ),
+                )
+              : Column(
+                  children: [
+                    for (final (i, rule) in st.rules.indexed) ...[
+                      if (i > 0) const Divider(height: 1),
+                      ListTile(
+                        dense: true,
+                        leading: Icon(
+                          rule.action == 'ALLOW'
+                              ? Icons.check_circle_outline
+                              : Icons.block,
+                          color: rule.action == 'ALLOW'
+                              ? Colors.green.shade600
+                              : errorColor,
+                        ),
+                        title: Text(
+                          rule.spec,
+                          style: const TextStyle(fontFamily: 'monospace'),
+                        ),
+                        trailing: Text(
+                          rule.action,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
         ),
       ],
     );
@@ -3389,12 +3762,13 @@ class _CronJobsPageState extends State<CronJobsPage> {
       final out = await _sql(
         'SELECT SCHEMA_NAME FROM information_schema.SCHEMATA;',
       );
-      final dbs = out
-          .split('\n')
-          .map((l) => l.trim())
-          .where((l) => l.isNotEmpty && !_systemDbs.contains(l))
-          .toList()
-        ..sort();
+      final dbs =
+          out
+              .split('\n')
+              .map((l) => l.trim())
+              .where((l) => l.isNotEmpty && !_systemDbs.contains(l))
+              .toList()
+            ..sort();
 
       final r = await Process.run('sudo', ['-n', 'cat', _cronPath]);
       final content = r.exitCode == 0 ? r.stdout.toString() : '';
@@ -3446,9 +3820,8 @@ class _CronJobsPageState extends State<CronJobsPage> {
     if (mounted) setState(() => _loading = false);
   }
 
-  String get _schedule => _preset == 'Custom cron'
-      ? _customCtrl.text.trim()
-      : _presets[_preset]!;
+  String get _schedule =>
+      _preset == 'Custom cron' ? _customCtrl.text.trim() : _presets[_preset]!;
 
   List<String> get _targets {
     if (_all || _selected.isEmpty) return [''];
@@ -3458,8 +3831,9 @@ class _CronJobsPageState extends State<CronJobsPage> {
   String _preview() {
     final sched = _schedule;
     final dbs = _targets;
-    final label =
-        _all || _selected.isEmpty ? 'all databases' : (_selected.toList()..sort()).join(', ');
+    final label = _all || _selected.isEmpty
+        ? 'all databases'
+        : (_selected.toList()..sort()).join(', ');
     final buf = StringBuffer()
       ..writeln('# Managed by Nginix Control Panel - automatic database backup')
       ..writeln('# Period: $_preset')
@@ -3482,8 +3856,10 @@ class _CronJobsPageState extends State<CronJobsPage> {
       return;
     }
     setState(() => _saving = true);
-    final tmp = File('${Directory.systemTemp.path}/cron_write_'
-        '${DateTime.now().microsecondsSinceEpoch}.tmp');
+    final tmp = File(
+      '${Directory.systemTemp.path}/cron_write_'
+      '${DateTime.now().microsecondsSinceEpoch}.tmp',
+    );
     try {
       await tmp.writeAsString(_preview());
       final cp = await Process.run('sudo', ['-n', 'cp', tmp.path, _cronPath]);
@@ -3516,8 +3892,10 @@ class _CronJobsPageState extends State<CronJobsPage> {
       children: [
         Row(
           children: [
-            const Text('Cron Jobs',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Text(
+              'Cron Jobs',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             const Spacer(),
             if (_saving || _loading)
               const YaruCircularProgressIndicator(strokeWidth: 2.5),
@@ -3530,8 +3908,10 @@ class _CronJobsPageState extends State<CronJobsPage> {
           ],
         ),
         const SizedBox(height: 6),
-        const Text('Automatic backup period for selected databases.',
-            style: TextStyle(color: Colors.grey)),
+        const Text(
+          'Automatic backup period for selected databases.',
+          style: TextStyle(color: Colors.grey),
+        ),
         if (_error != null) ...[
           const SizedBox(height: 8),
           Text(_error!, style: TextStyle(color: errColor)),
@@ -3552,18 +3932,29 @@ class _CronJobsPageState extends State<CronJobsPage> {
               subtitle: Text(
                 _currentCron.trim().isEmpty
                     ? 'No cron file found yet'
-                    : _currentCron.trim().split('\n').where(
-                        (l) => l.trim().isNotEmpty && !l.trim().startsWith('#')).join('\n'),
+                    : _currentCron
+                          .trim()
+                          .split('\n')
+                          .where(
+                            (l) =>
+                                l.trim().isNotEmpty &&
+                                !l.trim().startsWith('#'),
+                          )
+                          .join('\n'),
                 style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
               ),
             ),
           ),
           const SizedBox(height: 16),
-          const Text('Auto Backup Period',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const Text(
+            'Auto Backup Period',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
-            initialValue: _presets.containsKey(_preset) ? _preset : 'Custom cron',
+            initialValue: _presets.containsKey(_preset)
+                ? _preset
+                : 'Custom cron',
             decoration: const InputDecoration(
               labelText: 'Period',
               border: OutlineInputBorder(),
@@ -3590,8 +3981,10 @@ class _CronJobsPageState extends State<CronJobsPage> {
             ),
           ],
           const SizedBox(height: 20),
-          const Text('Databases',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const Text(
+            'Databases',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 8),
           YaruBorderContainer(
             child: Column(
@@ -3600,9 +3993,7 @@ class _CronJobsPageState extends State<CronJobsPage> {
                   title: const Text('Back up all databases'),
                   subtitle: const Text('Includes anything added later'),
                   value: _all,
-                  onChanged: _saving
-                      ? null
-                      : (v) => setState(() => _all = v),
+                  onChanged: _saving ? null : (v) => setState(() => _all = v),
                 ),
                 if (!_all) ...[
                   const Divider(height: 1),
@@ -3612,8 +4003,9 @@ class _CronJobsPageState extends State<CronJobsPage> {
                       TextButton(
                         onPressed: _saving
                             ? null
-                            : () => setState(() =>
-                                _selected = _databases.toSet()),
+                            : () => setState(
+                                () => _selected = _databases.toSet(),
+                              ),
                         child: const Text('Select all'),
                       ),
                       TextButton(
@@ -3632,28 +4024,29 @@ class _CronJobsPageState extends State<CronJobsPage> {
                       onChanged: _saving
                           ? null
                           : (v) => setState(() {
-                                if (v == true) {
-                                  _selected.add(db);
-                                } else {
-                                  _selected.remove(db);
-                                }
-                              }),
+                              if (v == true) {
+                                _selected.add(db);
+                              } else {
+                                _selected.remove(db);
+                              }
+                            }),
                     ),
                 ],
               ],
             ),
           ),
           const SizedBox(height: 20),
-          const Text('Generated Cron Entry',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const Text(
+            'Generated Cron Entry',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 8),
           YaruBorderContainer(
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: SelectableText(
                 _preview().trimRight(),
-                style:
-                    const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
               ),
             ),
           ),

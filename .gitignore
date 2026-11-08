@@ -49,3 +49,12 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Local server backups (contain secrets)
+/backups/
+
+# Database credentials (contain secrets)
+/DATABASE_CREDENTIALS.md
+
+# Local database vault (credentials + encryption key)
+/database/
