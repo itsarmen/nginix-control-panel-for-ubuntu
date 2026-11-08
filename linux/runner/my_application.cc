@@ -53,7 +53,9 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "Nginix Control Panel");
   }
 
-  gtk_window_set_default_size(window, 1280, 720);
+  // Open at a width that fits the top menu bar (10 x 76px + padding),
+  // with height kept smaller than the width.
+  gtk_window_set_default_size(window, 780, 540);
 
   // Resolve the bundled app icon relative to the executable so it works when
   // running straight from the build bundle (no installation required).

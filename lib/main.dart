@@ -589,7 +589,23 @@ class _ServicesPageState extends State<ServicesPage> {
       null => Colors.orange,
     };
 
+    Widget actionButton(String label, String cmd) => OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        minimumSize: const Size(0, 28),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: busy ? null : () => _run(cmd, s.service),
+      child: Text(label, style: const TextStyle(fontSize: 12)),
+    );
+
     return ListTile(
+      dense: true,
+      visualDensity: VisualDensity.compact,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+      minLeadingWidth: 0,
+      minVerticalPadding: 0,
       leading: SizedBox(
         width: 22,
         height: 22,
@@ -597,26 +613,26 @@ class _ServicesPageState extends State<ServicesPage> {
             ? const YaruCircularProgressIndicator(strokeWidth: 2)
             : Icon(Icons.circle, color: color, size: 14),
       ),
-      title: Text(s.name),
-      subtitle: Text(
-        isActive == true
-            ? 'Running'
-            : isActive == false
-            ? 'Stopped'
-            : 'Checking…',
-        style: TextStyle(color: color),
-      ),
-      trailing: Wrap(
-        spacing: 4,
+      title: Row(
         children: [
-          OutlinedButton(
-            onPressed: busy ? null : () => _run('restart', s.service),
-            child: const Text('Restart'),
+          Flexible(child: Text(s.name, overflow: TextOverflow.ellipsis)),
+          const SizedBox(width: 10),
+          Text(
+            isActive == true
+                ? 'Running'
+                : isActive == false
+                ? 'Stopped'
+                : 'Checking…',
+            style: TextStyle(color: color, fontSize: 12),
           ),
-          OutlinedButton(
-            onPressed: busy ? null : () => _run('stop', s.service),
-            child: const Text('Stop'),
-          ),
+        ],
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          actionButton('Restart', 'restart'),
+          const SizedBox(width: 4),
+          actionButton('Stop', 'stop'),
         ],
       ),
     );
@@ -629,9 +645,15 @@ class _ServicesPageState extends State<ServicesPage> {
     VoidCallback onPressed,
   ) {
     return FilledButton.tonalIcon(
+      style: FilledButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        minimumSize: const Size(0, 30),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
       onPressed: onPressed,
-      icon: Icon(icon, size: 18),
-      label: Text(label),
+      icon: Icon(icon, size: 16),
+      label: Text(label, style: const TextStyle(fontSize: 12)),
     );
   }
 
